@@ -58,6 +58,8 @@ pub struct Settings {
     pub adblock_skip_extensions: bool,
     /// "site|scheme" pairs allowed to open apps without asking (e.g. "roblox.com|roblox-player").
     pub app_links_allowed: Vec<String>,
+    /// Zoom remembered per site (host → factor), like Chrome.
+    pub site_zoom: std::collections::BTreeMap<String, f64>,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -114,6 +116,7 @@ impl Default for Settings {
             pinned_extensions: Vec::new(),
             adblock_skip_extensions: true,
             app_links_allowed: Vec::new(),
+            site_zoom: Default::default(),
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
@@ -180,11 +183,88 @@ pub struct Store {
     path: PathBuf,
 }
 
-pub fn app_dir() -> PathBuf {
+/// The folder Goatr.exe is in.
+pub fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Where Goatr keeps everything (history, settings, browsing data, extensions, Tor):
+/// %APPDATA%\Goatr, like Goat Browser did. A file named `portable` next to Goatr.exe
+/// keeps it all beside the .exe instead.
+pub fn app_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let exe = exe_dir();
+        if exe.join("portable").exists() {
+            return exe;
+        }
+        let Some(dir) = user_data_dir() else { return exe };
+        let _ = std::fs::create_dir_all(&dir);
+        migrate_from(&exe, &dir);
+        dir
+    })
+    .clone()
+}
+
+fn user_data_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Goatr"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
+            .map(|d| d.join("goatr"))
+    }
+}
+
+/// Older Goatr builds kept their data next to Goatr.exe: move it to the new place once.
+fn migrate_from(old: &std::path::Path, new: &std::path::Path) {
+    if old == new || new.join("data").join("goatr-data.json").exists() {
+        return;
+    }
+    // Private/Tor windows' folders are thrown away anyway.
+    for name in ["data", "profile", "extensions", "tor", "profiles"] {
+        let from = old.join(name);
+        let to = new.join(name);
+        if !from.is_dir() || to.exists() {
+            continue;
+        }
+        if std::fs::rename(&from, &to).is_err() {
+            // Different drive: copy, then remove the old copy only if everything arrived.
+            if copy_dir(&from, &to).is_ok() {
+                let _ = std::fs::remove_dir_all(&from);
+            } else {
+                let _ = std::fs::remove_dir_all(&to);
+            }
+        }
+    }
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let t = e.file_type()?;
+        let dest = to.join(e.file_name());
+        if t.is_dir() {
+            copy_dir(&e.path(), &dest)?;
+        } else if t.is_file() {
+            // Chromium lock files can be skipped.
+            if let Err(err) = std::fs::copy(e.path(), &dest) {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                if !(n == "lockfile" || n.ends_with(".lock") || n == "lock") {
+                    return Err(err);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// How this Goatr window was started: `--window private|tor`, `--profile NAME`, and a URL.

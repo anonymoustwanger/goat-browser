@@ -109,6 +109,8 @@ pub enum Cmd {
     OpenProfile(String),
     /// Answer to "Add extension?": yes or no.
     ExtConfirm(bool),
+    /// Remove a site from history so it stops being suggested.
+    ForgetSuggestion(String),
     /// Answer to "Open this app?": (open, always allow for this site).
     AppLinkAnswer(bool, bool),
     /// A tab an extension asked for: (address, switch to it).
@@ -140,6 +142,8 @@ pub enum Cmd {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    /// Open the zoom bubble without changing the zoom.
+    ShowZoom,
     Fullscreen,
     Devtools,
     Print,
@@ -199,6 +203,8 @@ pub enum Popup {
     ExtConfirm,
     /// "Open Roblox?" for app links.
     AppLink,
+    /// Zoom bubble under the address bar (Ctrl +/−).
+    Zoom,
 }
 
 pub struct Tab {
@@ -269,6 +275,10 @@ pub struct App {
     pub pending_ext: Option<extinstall::Pending>,
     /// A page asked to open an app; waiting for "Open …?".
     pub pending_app: Option<PendingApp>,
+    /// Put the cursor back in the address bar (no select-all), e.g. after removing a suggestion.
+    pub addr_refocus: bool,
+    /// The zoom bubble closes itself after this time unless the pointer is on it.
+    pub zoom_bubble_until: f64,
     last_cpu: f64,
     cpu_dirty: bool,
     /// Element-hiding work runs on its own thread so pages never wait on the window.
@@ -359,6 +369,8 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             let (tx, rx) = channel::<Ev>();
             let ctx = cc.egui_ctx.clone();
+            // Ctrl +/− zooms the page, not Goatr's own UI.
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
             let fonts_ok = chrome::install_fonts(&ctx);
             let sh = {
                 let tx = Mutex::new(tx.clone());
@@ -412,6 +424,8 @@ fn main() -> eframe::Result<()> {
                 ext_ids_known: false,
                 pending_ext: None,
                 pending_app: None,
+                addr_refocus: false,
+                zoom_bubble_until: 0.0,
                 last_cpu: 0.0,
                 cpu_dirty: false,
                 cos_tx: {
@@ -522,7 +536,7 @@ fn common<'a>(b: WebViewBuilder<'a>, sh: &Arc<Shared>, kind: TabKind, register_p
         b
     };
     let b = if kind.is_private_like() { b.with_incognito(true) } else { b };
-    let b = b.with_devtools(true).with_hotkeys_zoom(true).with_clipboard(true);
+    let b = b.with_devtools(true).with_hotkeys_zoom(false).with_clipboard(true);
     if register_proto {
         b.with_custom_protocol("goatr".into(), move |_id, req| { let _g = crashlog::Scope::new("internal page request"); pages::handle(&s, req) })
     } else {
@@ -884,6 +898,11 @@ impl App {
         let _ = self.tabs[idx].webview.focus();
         self.addr_editing = false;
         self.find_count = None;
+        // Switching tabs ends address-bar editing: drop its suggestions too.
+        if matches!(self.popup, Some((Popup::Suggest, _))) {
+            self.popup = None;
+        }
+        self.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("addr")));
     }
 
     fn close(&mut self, id: u32) {
@@ -942,7 +961,29 @@ impl App {
                 None => *steps.iter().rev().find(|s| **s < t.zoom - 0.001).unwrap_or(&0.25),
             };
             let _ = t.webview.zoom(t.zoom);
+            // Remember it for this site (not in private/Tor windows).
+            let host = store::host_of(&t.url);
+            let (z, kind) = (t.zoom, t.kind);
+            if !host.is_empty() && !kind.is_private_like() && t.url.starts_with("http") {
+                let mut s = self.sh.store.lock().unwrap();
+                if (z - 1.0).abs() < 0.001 {
+                    s.data.settings.site_zoom.remove(&host);
+                } else {
+                    s.data.settings.site_zoom.insert(host, z);
+                }
+                s.save();
+            }
         }
+        // Chrome-style bubble showing the new zoom (the ⋮ menu has its own zoom row).
+        let t = now(&self.ctx);
+        self.zoom_bubble_until = t + 2.0;
+        if !matches!(self.popup, Some((Popup::Zoom | Popup::Menu, _))) {
+            let at = chrome::to_screen(&self.ctx, egui::pos2(self.addr_rect.right(), self.addr_rect.bottom() + 4.0));
+            self.popup = Some((Popup::Zoom, at));
+            self.popup_had_focus = false;
+            self.popup_born = t;
+        }
+        self.ctx.request_repaint();
     }
 
     fn mutate_settings(&mut self, f: impl FnOnce(&mut store::Settings)) {
@@ -1124,7 +1165,17 @@ impl App {
                     let t = &mut self.tabs[i];
                     t.loading = !done;
                     *t.page_url.lock().unwrap() = url.clone();
+                    let new_host = store::host_of(&url) != store::host_of(&t.url);
                     t.url = url;
+                    if new_host || done {
+                        let host = store::host_of(&t.url);
+                        let want = if t.kind.is_private_like() { None } else { self.sh.store.lock().unwrap().data.settings.site_zoom.get(&host).copied() };
+                        let want = want.unwrap_or(1.0);
+                        if (t.zoom - want).abs() > 0.001 {
+                            t.zoom = want;
+                            let _ = t.webview.zoom(want);
+                        }
+                    }
                     if i == self.active {
                         self.addr_editing = self.addr_editing && !done;
                     }
@@ -1333,6 +1384,19 @@ impl App {
                     }
                 }
             }
+            Cmd::ForgetSuggestion(url) => {
+                {
+                    let mut s = self.sh.store.lock().unwrap();
+                    s.data.history.retain(|v| v.url != url);
+                    s.save();
+                }
+                self.sugg.retain(|(u, _)| *u != url);
+                self.sugg_sel = self.sugg_sel.filter(|&i| i < self.sugg.len());
+                if self.sugg.is_empty() && matches!(self.popup, Some((Popup::Suggest, _))) {
+                    self.popup = None;
+                }
+                self.addr_refocus = true;
+            }
             Cmd::AppLinkAnswer(open, always) => {
                 self.popup = None;
                 if let Some(p) = self.pending_app.take() {
@@ -1398,6 +1462,13 @@ impl App {
             Cmd::ZoomIn => self.set_zoom(None, 1.0),
             Cmd::ZoomOut => self.set_zoom(None, -1.0),
             Cmd::ZoomReset => self.set_zoom(Some(1.0), 0.0),
+            // The magnifier toggles: a press that just closed the bubble doesn't reopen it.
+            Cmd::ShowZoom if now(&self.ctx) - self.ctx.data(|d| d.get_temp::<f64>(egui::Id::new("zoom-closed-at")).unwrap_or(-9.0)) < 0.5 => {}
+            Cmd::ShowZoom => {
+                let z = self.active_tab().map(|t| t.zoom);
+                self.set_zoom(z, 0.0);
+                self.zoom_bubble_until = now(&self.ctx) + 4.0;
+            }
             Cmd::Fullscreen => {
                 self.fullscreen = !self.fullscreen;
                 self.ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
@@ -1837,6 +1908,9 @@ fn key_action(a: &str, tab: u32) -> Option<Cmd> {
         "forward" => Cmd::Forward,
         "home" => Cmd::Home,
         "escape" => Cmd::ClosePopup,
+        "zoom_in" => Cmd::ZoomIn,
+        "zoom_out" => Cmd::ZoomOut,
+        "zoom_reset" => Cmd::ZoomReset,
         "install_extension" => Cmd::InstallExtension,
         _ => return None,
     })
@@ -1853,6 +1927,15 @@ impl eframe::App for App {
             gtk::main_iteration_do(false);
         }
         let frame_t0 = std::time::Instant::now();
+        #[cfg(windows)]
+        if panels::MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(h) = frame.window_handle() {
+                if let RawWindowHandle::Win32(w) = h.as_raw() {
+                    panels::MAIN_HWND.store(w.hwnd.get(), std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
         crashlog::phase("frame: webview events");
         crashlog::set_hidden(ui.ctx().input(|i| i.viewport().minimized.unwrap_or(false)));
         let mut cmds = Vec::new();
@@ -1871,6 +1954,12 @@ impl eframe::App for App {
             self.sh.system_dark.store(t == egui::Theme::Dark, Ordering::Relaxed);
         }
 
+        // A press anywhere in Goatr's own UI (address bar included) closes the zoom bubble.
+        if matches!(self.popup, Some((Popup::Zoom, _))) && ui.ctx().input(|i| i.pointer.any_pressed()) {
+            self.popup = None;
+            let t = now(ui.ctx());
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("zoom-closed-at"), t));
+        }
         // A press anywhere in Goatr's own UI closes an open extension pop-up.
         if self.ext_popup.is_some() && ui.ctx().input(|i| i.pointer.any_pressed()) {
             let folder = self.ext_popup.take().map(|p| p.1).unwrap_or_default();

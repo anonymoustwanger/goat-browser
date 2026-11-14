@@ -180,9 +180,23 @@
     else if (e.altKey && k === 'arrowright') a = 'forward';
     else if (e.altKey && k === 'home') a = 'home';
     else if (c && !sh && /^[1-9]$/.test(k)) a = 'select:' + k;
+    else if (c && (k === '=' || k === '+')) a = 'zoom_in';
+    else if (c && (k === '-' || k === '_')) a = 'zoom_out';
+    else if (c && k === '0') a = 'zoom_reset';
     else if (k === 'escape') { post({cmd: 'key', action: 'escape'}); return; } // let pages see Esc too
     if (a) { e.preventDefault(); e.stopPropagation(); post({cmd: 'key', action: a}); }
   }, true);
+
+  // Ctrl + mouse wheel zooms (Goatr shows the zoom bubble).
+  let lastWheel = 0;
+  window.addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey) || !e.cancelable) return;
+    e.preventDefault();
+    const t = Date.now();
+    if (t - lastWheel < 90) return;
+    lastWheel = t;
+    post({cmd: 'key', action: e.deltaY < 0 ? 'zoom_in' : 'zoom_out'});
+  }, {capture: true, passive: false});
 
   // Mouse back/forward side buttons.
   window.addEventListener('mouseup', e => {

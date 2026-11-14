@@ -767,6 +767,8 @@ impl App {
 
         // Right side: "Add to Goatr" on store pages, then the star.
         let mut right = rect.right() - 6.0;
+        let zoom = self.active_tab().map(|t| t.zoom).unwrap_or(1.0);
+        let zoom_btn = (zoom - 1.0).abs() > 0.001;
         if web {
             let star = Rect::from_min_size(pos2(right - 26.0, cy - 13.0), Vec2::splat(26.0));
             right -= 30.0;
@@ -812,11 +814,45 @@ impl App {
             }
         }
 
+        // Magnifier while the page isn't at 100%: click for the zoom bubble.
+        if zoom_btn && !focused {
+            let zr = Rect::from_min_size(pos2(right - 26.0, cy - 13.0), Vec2::splat(26.0));
+            right -= 30.0;
+            let r = ui.interact(zr, id.with("zoom"), Sense::click());
+            if r.hovered() {
+                p.rect_filled(zr, 6, pal.bg3);
+            }
+            let zoom_in = zoom > 1.0;
+            let ir = Rect::from_center_size(zr.center(), Vec2::splat(15.0));
+            icons::draw(&p, ir, icons::ZOOM, if r.hovered() { pal.text } else { pal.muted }, 1.5);
+            // + or − inside the lens.
+            let c = pos2(ir.left() + ir.width() * 7.0 / 16.0, ir.top() + ir.height() * 7.0 / 16.0);
+            let col = if r.hovered() { pal.text } else { pal.muted };
+            p.line_segment([pos2(c.x - 2.2, c.y), pos2(c.x + 2.2, c.y)], Stroke::new(1.3, col));
+            if zoom_in {
+                p.line_segment([pos2(c.x, c.y - 2.2), pos2(c.x, c.y + 2.2)], Stroke::new(1.3, col));
+            }
+            if r.on_hover_text(format!("Zoom: {}%", (zoom * 100.0).round())).clicked() {
+                cmds.push(Cmd::ShowZoom);
+            }
+        }
+
         // The text field.
         if !self.addr_editing {
             self.addr = crate::pages::display_url(url);
         }
         let mut select_all = false;
+        // Back to the address bar after a click in the suggestions: keep the typed text as it is.
+        let mut keep_text = false;
+        if self.addr_refocus {
+            self.addr_refocus = false;
+            keep_text = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.memory_mut(|m| m.request_focus(id));
+            self.addr_editing = true;
+            ctx.data_mut(|d| d.remove::<f64>(Id::new("sugg-close-at")));
+            ctx.data_mut(|d| d.remove::<f64>(Id::new("unfocused-at")));
+        }
         if self.addr_focus_req {
             self.addr_focus_req = false;
             ctx.memory_mut(|m| m.request_focus(id));
@@ -847,7 +883,21 @@ impl App {
                     .show(ui)
             })
             .inner;
-        if out.response.gained_focus() || select_all {
+        if keep_text || ctx.data(|d| d.get_temp::<bool>(Id::new("addr-keep-text")).unwrap_or(false)) {
+            // Cursor at the end, nothing selected.
+            let n = self.addr.chars().count();
+            out.state.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(n))));
+            out.state.store(&ctx, id);
+            // Keep this up until the focus has actually come back.
+            let still = !out.response.gained_focus() && !focused;
+            ctx.data_mut(|d| {
+                if still {
+                    d.insert_temp(Id::new("addr-keep-text"), true);
+                } else {
+                    d.remove::<bool>(Id::new("addr-keep-text"));
+                }
+            });
+        } else if out.response.gained_focus() || select_all {
             self.addr_editing = true;
             let n = self.addr.chars().count();
             out.state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(n))));
@@ -906,6 +956,10 @@ impl App {
                 let t = now(&ctx);
                 ctx.data_mut(|d| d.insert_temp(Id::new("sugg-close-at"), t + 0.3));
             }
+        }
+        // Suggestions only live while the address bar is being edited.
+        if !self.addr_editing && matches!(self.popup, Some((Popup::Suggest, _))) {
+            self.popup = None;
         }
         if !focused && matches!(self.popup, Some((Popup::Suggest, _))) {
             let at: f64 = ctx.data(|d| d.get_temp(Id::new("sugg-close-at")).unwrap_or(0.0));

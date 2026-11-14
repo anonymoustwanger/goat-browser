@@ -8,4 +8,4 @@
 /tor
 /.cargo
 *.exe
-WebView2Loader.dll
+/WebView2Loader.dll

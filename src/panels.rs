@@ -22,6 +22,9 @@ const PAD_X: f32 = 0.0;
 const PAD_TOP: f32 = 0.0;
 const PAD_BOTTOM: f32 = 0.0;
 
+/// Goatr's main window, so pop-ups can belong to it.
+pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
 /// Ask Windows 11 for rounded corners on a pop-up window (found by its unique title).
 #[cfg(windows)]
 fn round_corners(title: &str) {
@@ -43,12 +46,17 @@ fn round_corners(title: &str) {
 #[cfg(windows)]
 fn prepare_window(title: &str) {
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWLP_HWNDPARENT, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED};
     round_corners(title);
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, &HSTRING::from(title)) {
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as isize);
+            // Owned by Goatr's window: stays above Goatr, but not above other apps.
+            let owner = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
+            if owner != 0 {
+                SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner);
+            }
             let _ = SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), 0, LWA_ALPHA);
         }
     }
@@ -211,6 +219,10 @@ impl App {
                 card_w = self.addr_rect.width();
                 card_h = 8.0 + self.sugg.len() as f32 * 36.0;
             }
+            Popup::Zoom => {
+                card_w = 290.0;
+                card_h = 52.0;
+            }
             Popup::AppLink => {
                 card_w = 400.0;
                 card_h = 20.0 + 26.0 + 10.0 + 40.0 + 30.0 + 18.0 + 36.0 + 18.0;
@@ -224,7 +236,7 @@ impl App {
         let win = vec2(card_w + PAD_X * 2.0, card_h + PAD_TOP + PAD_BOTTOM);
         // Right-aligned to the button for toolbar panels; at the pointer for context menus.
         let pos = match popup {
-            Popup::Menu | Popup::Shield | Popup::Extensions => pos2(at.x - win.x, at.y - 4.0),
+            Popup::Menu | Popup::Shield | Popup::Extensions | Popup::Zoom => pos2(at.x - win.x, at.y - 4.0),
             Popup::Suggest => pos2(at.x - PAD_X, at.y - PAD_TOP),
             Popup::ExtConfirm | Popup::AppLink => pos2(at.x - win.x / 2.0, at.y + 6.0),
             _ => pos2(at.x - PAD_X + 2.0, at.y - PAD_TOP + 2.0),
@@ -246,6 +258,7 @@ impl App {
             Popup::Suggest => "suggest",
             Popup::ExtConfirm => "addext",
             Popup::AppLink => "applink",
+            Popup::Zoom => "zoom",
         };
         let title = format!("Goatr pop-up {name}");
         let vid = ViewportId::from_hash_of(match popup {
@@ -257,6 +270,7 @@ impl App {
             Popup::Suggest => "suggest",
             Popup::ExtConfirm => "addext",
             Popup::AppLink => "applink",
+            Popup::Zoom => "zoom",
         });
         // A new pop-up is created hidden; once Windows' own show animation is switched off it's
         // shown and fades/grows in from its centre.
@@ -271,12 +285,14 @@ impl App {
             .with_decorations(false)
             .with_transparent(false)
             .with_resizable(false)
-            .with_always_on_top()
             .with_taskbar(false)
-            .with_active(popup != Popup::Suggest)
+            .with_active(popup != Popup::Suggest && popup != Popup::Zoom)
             .with_position(pos)
             .with_inner_size(win)
             .with_visible(ready);
+        // Windows keeps pop-ups above Goatr by making Goatr their owner (see prepare_window).
+        #[cfg(not(windows))]
+        let builder = builder.with_always_on_top();
 
         let mut close = false;
         #[allow(unused_mut)]
@@ -293,10 +309,26 @@ impl App {
             Popup::Suggest => "pop-up window: address suggestions",
             Popup::ExtConfirm => "pop-up window: add extension",
             Popup::AppLink => "pop-up window: open app",
+            Popup::Zoom => "pop-up window: zoom",
         });
         ctx.show_viewport_immediate(vid, builder, |ui, _class| {
             let pctx = ui.ctx().clone();
-            if closing.is_none() && popup != Popup::Suggest {
+            // The zoom bubble closes on its own unless the pointer is on it.
+            if closing.is_none() && popup == Popup::Zoom {
+                let t = now(&pctx);
+                let area = pctx.content_rect();
+                let on_it = pctx.input(|i| i.pointer.hover_pos()).is_some_and(|q| area.shrink(2.0).contains(q));
+                if on_it {
+                    self.zoom_bubble_until = self.zoom_bubble_until.max(t + 1.0);
+                }
+                if t > self.zoom_bubble_until {
+                    close = true;
+                } else {
+                    // Immediate pop-ups only redraw with Goatr's window, so wake that.
+                    pctx.request_repaint_after_for(std::time::Duration::from_millis(100), egui::ViewportId::ROOT);
+                }
+            }
+            if closing.is_none() && popup != Popup::Suggest && popup != Popup::Zoom {
                 match pctx.input(|i| i.viewport().focused) {
                     Some(true) => self.popup_had_focus = true,
                     // "Add extension?" stays until you answer.
@@ -365,13 +397,15 @@ impl App {
                 Popup::Suggest => self.draw_suggest(ui, &p, card_r, &pal, &mut local),
                 Popup::ExtConfirm => self.draw_ext_confirm(ui, &p, card_r, &pal, &mut local),
                 Popup::AppLink => self.draw_app_link(ui, &p, card_r, &pal, &mut local),
+                Popup::Zoom => self.draw_zoom(ui, &p, card_r, &pal, &mut local),
             }
             if closing.is_some() {
                 return;
             }
             // Most actions close the panel; the shield's own switches keep it open.
             for c in local {
-                let keep = matches!(c, Cmd::SetAdblock(_) | Cmd::SetLevel(_) | Cmd::ToggleSiteAdblock | Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomReset | Cmd::SetTheme(_));
+                let keep = matches!(c, Cmd::SetAdblock(_) | Cmd::SetLevel(_) | Cmd::ToggleSiteAdblock | Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomReset | Cmd::SetTheme(_))
+                    || popup == Popup::Zoom;
                 if !keep {
                     close = true;
                 }
@@ -444,6 +478,39 @@ impl App {
         } else if rc.clicked() || esc {
             cmds.push(Cmd::ExtConfirm(false));
         }
+    }
+
+    /// Chrome-style zoom bubble: "Zoom: 125%  [−] [+]  Reset".
+    fn draw_zoom(&mut self, ui: &mut Ui, p: &Painter, card_r: Rect, pal: &Palette, cmds: &mut Vec<Cmd>) {
+        let ctx = ui.ctx().clone();
+        let zoom = self.active_tab().map(|t| t.zoom).unwrap_or(1.0);
+        let cy = card_r.center().y;
+        let x0 = card_r.left() + 16.0;
+        p.text(pos2(x0, cy), Align2::LEFT_CENTER, "Zoom", font(13.0), pal.muted);
+        p.text(pos2(x0 + 44.0, cy), Align2::LEFT_CENTER, format!("{}%", (zoom * 100.0).round()), bold(14.0), pal.text);
+        let mut x = card_r.right() - 12.0;
+        let mut btn = |w: f32, key: &str, label: &str, cmd: Cmd, tip: &str, accent: bool| {
+            let r = Rect::from_min_size(pos2(x - w, cy - 15.0), vec2(w, 30.0));
+            x -= w + 6.0;
+            let resp = ui.interact(r, Id::new(("zoom-bubble", key)), Sense::click());
+            let h = crate::anim::hover(&ctx, Id::new(("zoom-bubble-h", key)), resp.hovered(), 0.12);
+            if accent {
+                paint::accent_fill(p, r, 8, pal);
+                if h > 0.0 {
+                    p.rect_filled(r, 8, alpha(Color32::WHITE, 0.10 * h));
+                }
+            } else {
+                p.rect_filled(r, 8, mix(pal.bg2, pal.bg3, h));
+                p.rect_stroke(r, 8, Stroke::new(1.0, pal.line), egui::StrokeKind::Inside);
+            }
+            p.text(r.center(), Align2::CENTER_CENTER, label, if label.len() == 1 || label == "−" { font(16.0) } else { bold(12.5) }, if accent { pal.ink } else { pal.text });
+            if resp.on_hover_text(tip).clicked() {
+                cmds.push(cmd);
+            }
+        };
+        btn(64.0, "reset", "Reset", Cmd::ZoomReset, "Back to 100% (Ctrl+0)", true);
+        btn(32.0, "in", "+", Cmd::ZoomIn, "Zoom in (Ctrl +)", false);
+        btn(32.0, "out", "−", Cmd::ZoomOut, "Zoom out (Ctrl −)", false);
     }
 
     /// "Open Roblox?": a site wants to start an app on this PC.
@@ -981,6 +1048,9 @@ impl App {
         let ctx = ui.ctx().clone();
         let mut y = card_r.top() + 4.0;
         let sugg = self.sugg.clone();
+        if ctx.input(|i| !i.pointer.any_down() && !i.pointer.any_released()) {
+            ctx.data_mut(|d| d.remove::<bool>(Id::new("sugg-x-down")));
+        }
         for (i, (url, title)) in sugg.iter().enumerate() {
             let r = Rect::from_min_size(pos2(card_r.left() + 4.0, y), vec2(card_r.width() - 8.0, 36.0));
             y += 36.0;
@@ -994,13 +1064,36 @@ impl App {
             let t = title.trim_start_matches('★').trim();
             let ic = Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0));
             icons::draw(p, ic, if star { icons::STAR } else { icons::CLOCK }, if star { pal.accent } else { pal.muted }, 1.5);
+            // × removes a history suggestion (not bookmarks).
+            let xr = Rect::from_center_size(pos2(r.right() - 20.0, r.center().y), Vec2::splat(24.0));
+            let show_x = !star && (resp.hovered() || self.sugg_sel == Some(i));
+            let on_x = ctx.input(|i| i.pointer.interact_pos()).is_some_and(|pt| xr.contains(pt));
+            let x_hit = !star && resp.hovered() && on_x;
+            if show_x {
+                if x_hit {
+                    p.rect_filled(xr, 6, alpha(pal.text, 0.10));
+                }
+                icons::draw(p, xr.shrink(6.0), icons::CLOSE, if x_hit { pal.text } else { pal.muted }, 1.6);
+            }
             let tx = ic.right() + 10.0;
-            let avail = r.right() - 10.0 - tx;
+            let avail = r.right() - (if star { 10.0 } else { 40.0 }) - tx;
             let tr = text_elided(p, pos2(tx, r.center().y), if t.is_empty() { url } else { t }, font(13.0), pal.text, avail * 0.6, Align2::LEFT_CENTER);
             let short = url.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.");
-            text_elided(p, pos2(tr.right() + 10.0, r.center().y), &format!("— {short}"), font(12.0), pal.accent, (r.right() - 10.0 - tr.right() - 10.0).max(10.0), Align2::LEFT_CENTER);
+            text_elided(p, pos2(tr.right() + 10.0, r.center().y), &format!("— {short}"), font(12.0), pal.accent, (tx + avail - tr.right() - 10.0).max(10.0), Align2::LEFT_CENTER);
+            let pressed = ctx.input(|i| i.pointer.primary_pressed());
+            if x_hit && pressed {
+                // The × was pressed: remove it, and ignore the release that follows.
+                ctx.data_mut(|d| d.insert_temp(Id::new("sugg-x-down"), true));
+                cmds.push(Cmd::ForgetSuggestion(url.clone()));
+                break;
+            }
+            let x_down: bool = ctx.data(|d| d.get_temp(Id::new("sugg-x-down")).unwrap_or(false));
+            if resp.clicked() && x_down {
+                ctx.data_mut(|d| d.remove::<bool>(Id::new("sugg-x-down")));
+                continue;
+            }
             // Act on press: the click also takes focus from the address bar.
-            if resp.hovered() && ctx.input(|i| i.pointer.primary_pressed()) || resp.clicked() {
+            if !(on_x && !star) && !x_down && (resp.hovered() && pressed || resp.clicked()) {
                 cmds.push(Cmd::Navigate(url.clone()));
                 self.addr_editing = false;
                 break;

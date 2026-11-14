@@ -65,8 +65,10 @@ pub fn rrect_points(rect: Rect, r: CornerRadius) -> Vec<Pos2> {
         if rad <= 0.5 {
             out.push(sharp);
         } else {
-            for i in 0..=6 {
-                out.push(center + Vec2::angled(a0 + (i as f32 / 6.0) * FRAC_PI_2) * rad);
+            // Enough segments that the curve looks round at any size.
+            let n = ((rad * 0.9) as usize).clamp(4, 24);
+            for i in 0..=n {
+                out.push(center + Vec2::angled(a0 + (i as f32 / n as f32) * FRAC_PI_2) * rad);
             }
         }
     };
@@ -87,14 +89,49 @@ pub fn grad_rrect(p: &Painter, rect: Rect, r: impl Into<CornerRadius>, stops: &[
     let len = (rect.width() * dir.x.abs() + rect.height() * dir.y.abs()).max(1.0);
     let c = rect.center();
     let t_of = |q: Pos2| 0.5 + (q - c).dot(dir) / len;
-    let mut mesh = Mesh::default();
-    mesh.vertices.push(Vertex { pos: c, uv: WHITE_UV, color: sample(stops, 0.5) });
-    for q in &pts {
-        mesh.vertices.push(Vertex { pos: *q, uv: WHITE_UV, color: sample(stops, t_of(*q)) });
+    let colors: Vec<Color32> = pts.iter().map(|q| sample(stops, t_of(*q))).collect();
+    fan_smooth(p, c, sample(stops, 0.5), &pts, &colors);
+}
+
+/// Fill a polygon as a fan from `center`, with a one-pixel soft edge (like egui's own
+/// shapes) so its outline isn't jagged.
+fn fan_smooth(p: &Painter, center: Pos2, center_color: Color32, pts: &[Pos2], colors: &[Color32]) {
+    let n = pts.len();
+    if n < 3 {
+        return;
     }
-    let n = pts.len() as u32;
+    let feather = 1.0 / p.ctx().pixels_per_point();
+    // Outward direction depends on winding.
+    let area: f32 = (0..n).map(|i| {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        a.x * b.y - b.x * a.y
+    }).sum();
+    let sign = if area >= 0.0 { 1.0 } else { -1.0 };
+    let out_dir = |i: usize| -> Vec2 {
+        let prev = pts[(i + n - 1) % n];
+        let next = pts[(i + 1) % n];
+        let e1 = (pts[i] - prev).normalized();
+        let e2 = (next - pts[i]).normalized();
+        let n1 = Vec2::new(e1.y, -e1.x) * sign;
+        let n2 = Vec2::new(e2.y, -e2.x) * sign;
+        let m = (n1 + n2).normalized();
+        let cos = m.dot(n1).max(0.3);
+        if m.is_finite() { m / cos } else { n1 }
+    };
+    let mut mesh = Mesh::default();
+    mesh.vertices.push(Vertex { pos: center, uv: WHITE_UV, color: center_color });
     for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+        let d = out_dir(i) * (feather * 0.5);
+        mesh.vertices.push(Vertex { pos: pts[i] - d, uv: WHITE_UV, color: colors[i] });
+        mesh.vertices.push(Vertex { pos: pts[i] + d, uv: WHITE_UV, color: Color32::TRANSPARENT });
+    }
+    let n = n as u32;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (ii, io, ji, jo) = (1 + 2 * i, 2 + 2 * i, 1 + 2 * j, 2 + 2 * j);
+        mesh.add_triangle(0, ii, ji);
+        mesh.add_triangle(ii, io, ji);
+        mesh.add_triangle(io, jo, ji);
     }
     p.add(Shape::mesh(mesh));
 }
@@ -114,16 +151,7 @@ pub fn fill_fan(p: &Painter, pts: &[Pos2], color: Color32) {
         return;
     }
     let c = pts.iter().fold(Vec2::ZERO, |a, q| a + q.to_vec2()) / pts.len() as f32;
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(c.to_pos2(), color);
-    for q in pts {
-        mesh.colored_vertex(*q, color);
-    }
-    let n = pts.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    p.add(Shape::mesh(mesh));
+    fan_smooth(p, c.to_pos2(), color, pts, &vec![color; pts.len()]);
 }
 
 /// Soft drop shadow under a rounded card.
