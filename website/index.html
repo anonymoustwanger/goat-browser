@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Goat Browser</title>
+  <meta name="description" content="Goat Browser is a free, private Chromium browser for Windows and Linux with a built-in ad blocker, Tor, fingerprint protection, encrypted DNS and Chrome extensions.">
+  <meta property="og:title" content="Goat Browser">
+  <meta property="og:description" content="A private, fast browser. Ad blocker, Tor, fingerprint protection and Chrome extensions built in.">
+  <meta property="og:image" content="https://goatbrowser.pages.dev/img/newtab.webp">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" href="favicon.png">
+  <style>
+    :root {
+      --bg: #0a0a0a; --bg-2: #121212; --bg-3: #1b1b1b; --line: #262626;
+      --text: #f2f2f2; --muted: #9a9a9a; --accent: #5fd3b3; --accent-2: #6ea8ff;
+      font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.5; font-size: 15px; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; }
+    img { max-width: 100%; height: auto; display: block; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+    header { border-bottom: 1px solid var(--line); }
+    header .wrap { display: flex; align-items: center; gap: 18px; height: 52px; }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; }
+    .brand img { width: 24px; height: 24px; }
+    header nav { margin-left: auto; display: flex; gap: 18px; font-size: 14px; }
+    header nav a { color: var(--muted); text-decoration: none; }
+    header nav a:hover { color: var(--text); }
+
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 14.5px; text-decoration: none; border: 1px solid var(--line); transition: border-color .15s ease, background .15s ease; }
+    .btn:hover { border-color: #555; }
+    .btn svg { width: 16px; height: 16px; flex: none; }
+    .btn.primary { background: #fff; color: #000; border-color: #fff; }
+    .btn.primary:hover { background: #e6e6e6; }
+
+    .hero { text-align: center; padding: 52px 0 8px; background: radial-gradient(520px 240px at 50% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%); }
+    .hero .logo { width: 60px; height: 60px; margin: 0 auto 18px; border-radius: 15px; }
+    h1 { font-size: clamp(32px, 5.5vw, 50px); line-height: 1.05; letter-spacing: -.03em; margin: 0 0 12px; font-weight: 800; }
+    h1 span { background: linear-gradient(120deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { color: var(--muted); max-width: 540px; margin: 0 auto 22px; font-size: 16px; }
+    .cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .meta { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+    .shot { margin: 32px auto 0; max-width: 820px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 24px 70px rgba(0,0,0,.65); }
+
+    section { padding: 48px 0 0; }
+    h2 { font-size: 24px; letter-spacing: -.02em; margin: 0 0 16px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    .card h3 { margin: 0 0 4px; font-size: 15px; }
+    .card p { margin: 0; color: var(--muted); font-size: 13.5px; }
+    .profiles { margin-top: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: var(--muted); font-size: 13.5px; }
+    .profiles b { color: var(--text); }
+
+    details { border-bottom: 1px solid var(--line); }
+    summary { cursor: pointer; padding: 12px 0; font-weight: 600; font-size: 14.5px; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--muted); font-weight: 400; }
+    details[open] summary::after { content: "−"; }
+    details p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+    code { background: var(--bg-3); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; font-size: .9em; }
+
+    /* ---- animations (all off when the visitor's system asks for reduced motion) ---- */
+    @media (prefers-reduced-motion: no-preference) {
+      @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+      @keyframes pop { from { opacity: 0; transform: scale(.7) rotate(-8deg); } to { opacity: 1; transform: none; } }
+      @keyframes float { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-6px) rotate(-2deg); } }
+      @keyframes shine { to { background-position: 200% center; } }
+      @keyframes glow { 0%, 100% { opacity: .85; transform: translateX(-3%) scale(1); } 50% { opacity: 1; transform: translateX(3%) scale(1.06); } }
+      @keyframes tilt { from { opacity: 0; transform: perspective(1200px) rotateX(14deg) translateY(40px) scale(.96); } to { opacity: 1; transform: none; } }
+
+      .hero { position: relative; isolation: isolate; }
+      .hero::before { content: ""; position: absolute; inset: -40px 0 auto; height: 360px; z-index: -1; pointer-events: none;
+        background: radial-gradient(420px 200px at 40% 20%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+                    radial-gradient(380px 180px at 62% 10%, color-mix(in srgb, var(--accent-2) 12%, transparent), transparent 70%);
+        animation: glow 9s ease-in-out infinite; }
+      .hero .logo { animation: pop .7s cubic-bezier(.34, 1.56, .64, 1) both, float 5s ease-in-out .8s infinite; }
+      .hero h1 { animation: rise .7s cubic-bezier(.16, 1, .3, 1) .1s both; }
+      h1 span { background-size: 200% auto; background-image: linear-gradient(120deg, var(--accent), var(--accent-2), var(--accent)); animation: shine 6s linear infinite; }
+      .hero .lead { animation: rise .7s cubic-bezier(.16, 1, .3, 1) .2s both; }
+      .hero .cta { animation: rise .7s cubic-bezier(.16, 1, .3, 1) .3s both; }
+      .hero .meta { animation: rise .7s cubic-bezier(.16, 1, .3, 1) .38s both; }
+      .shot { animation: tilt 1.1s cubic-bezier(.16, 1, .3, 1) .45s both; transition: transform .4s cubic-bezier(.16, 1, .3, 1), box-shadow .4s ease; }
+      .shot:hover { transform: translateY(-4px); box-shadow: 0 34px 90px rgba(0,0,0,.75), 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+      .btn { transition: transform .2s cubic-bezier(.34, 1.56, .64, 1), border-color .15s ease, background .15s ease, box-shadow .2s ease; }
+      .btn:hover { transform: translateY(-2px); }
+      .btn.primary:hover { box-shadow: 0 8px 26px color-mix(in srgb, #fff 18%, transparent); }
+      .btn:active { transform: translateY(0) scale(.97); }
+
+      .card { transition: translate .25s cubic-bezier(.16, 1, .3, 1), border-color .25s ease, background .25s ease; }
+      .card:hover { translate: 0 -3px; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--bg-2)); }
+
+      details[open] p { animation: rise .35s cubic-bezier(.16, 1, .3, 1) both; }
+      summary::after { transition: transform .2s ease; }
+
+      /* Sections fade up as they scroll into view (browsers without this support just show them). */
+      @supports (animation-timeline: view()) {
+        .card, .profiles, h2, details { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% cover 22%; }
+      }
+    }
+
+    footer { margin-top: 48px; border-top: 1px solid var(--line); padding: 20px 0; color: var(--muted); font-size: 13px; }
+    footer .wrap { display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <a class="brand" href="./"><img src="img/logo.png" alt="" width="24" height="24">Goat Browser</a>
+      <nav><a href="#features">Features</a><a href="#faq">FAQ</a><a href="https://github.com/anonymoustwanger/goat-browser">GitHub</a></nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div class="wrap">
+        <img class="logo" src="img/logo.png" alt="Goat Browser logo" width="60" height="60">
+        <h1>Browse private. <span>Browse fast.</span></h1>
+        <p class="lead">A free browser that blocks ads and trackers, and keeps what you do to yourself.</p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/anonymoustwanger/goat-browser/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>
+            Download for Windows
+          </a>
+          <a class="btn" href="https://github.com/anonymoustwanger/goat-browser/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a3.5 3.5 0 0 0-3.5 3.5v3.2c0 1-.6 2-1.4 3.1C5.9 14.5 5 16 5 17.5c0 .8.4 1.3 1 1.5M12 3a3.5 3.5 0 0 1 3.5 3.5v3.2c0 1 .6 2 1.4 3.1 1.2 1.7 2.1 3.2 2.1 4.7 0 .8-.4 1.3-1 1.5M8 21c1.2-.6 2.5-1 4-1s2.8.4 4 1"/><circle cx="10.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="13.5" cy="7.5" r=".6" fill="currentColor"/></svg>
+            Download for Linux
+          </a>
+        </div>
+        <p class="meta">Free for Windows and Linux</p>
+        <div class="shot">
+          <img src="img/newtab-sm.webp" srcset="img/newtab-sm.webp 960w, img/newtab.webp 1920w" sizes="(max-width: 860px) 100vw, 820px" width="960" height="540" alt="Goat Browser's new tab page with bookmarks, dark theme">
+        </div>
+      </div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <h2>What you get</h2>
+        <div class="grid">
+          <div class="card"><h3>No ads</h3><p>Ads, trackers and cookie pop-ups are blocked.</p></div>
+          <div class="card"><h3>Hide your location</h3><p>Turn on Tor with one click.</p></div>
+          <div class="card"><h3>Private windows</h3><p>Nothing is saved after you close them.</p></div>
+          <div class="card"><h3>Harder to track</h3><p>Websites can't recognize your computer.</p></div>
+          <div class="card"><h3>Profiles</h3><p>Keep work and personal separate.</p></div>
+          <div class="card"><h3>Translate pages</h3><p>Read any site in your language.</p></div>
+          <div class="card"><h3>Chrome extensions</h3><p>Use the extensions you already like.</p></div>
+          <div class="card"><h3>Folders and themes</h3><p>Group tabs and make it yours.</p></div>
+          <div class="card"><h3>Light and fast</h3><p>Unused tabs sleep to save memory.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="wrap">
+        <h2>FAQ</h2>
+        <details><summary>Windows says "Windows protected your PC"</summary><p>Windows shows this for new apps. Click <b>More info</b>, then <b>Run anyway</b>.</p></details>
+        <details><summary>How do I run it on Linux?</summary><p>Download it, right-click it, choose Properties, allow it to run as a program, then double-click it.</p></details>
+        <details><summary>Does Goat hide who I am?</summary><p>It stops ads and trackers. To also hide your location, turn on Tor in Goat or use a VPN.</p></details>
+        <details><summary>Where is my data?</summary><p>Only on your computer. There's no account to sign up for.</p></details>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Goat Browser</span>
+      <span><a href="https://github.com/anonymoustwanger/goat-browser">GitHub</a> · <a href="https://github.com/anonymoustwanger/goat-browser/issues">Report a problem</a></span>
+    </div>
+  </footer>
+</body>
+</html>

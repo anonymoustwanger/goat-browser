@@ -1,0 +1,81 @@
+//! State shared between the main window and the built-in pages (which are served on another thread).
+
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+
+use crate::adblock::AdBlock;
+use crate::store::Store;
+use crate::tor::Tor;
+
+/// Things a built-in page (or a background job) needs the main window to do.
+#[derive(Debug)]
+pub enum Notice {
+    StoreChanged,
+    ClearBrowsingData,
+    OpenTorTab,
+    OpenPrivateTab,
+    TorChanged,
+    AdblockUpdated(usize),
+    /// An extension finished downloading and waits for your OK (or failed).
+    ExtensionInstalled(Result<crate::extinstall::Pending, String>),
+    Restart,
+    /// An extension asked for a tab (chrome.tabs.create).
+    /// (address, switch to it, extension asked for a pop-up window)
+    OpenTab(String, bool, bool),
+    /// Open a window for a profile ("" = default).
+    OpenProfile(String),
+}
+
+pub struct Shared {
+    pub store: Mutex<Store>,
+    pub system_dark: AtomicBool,
+    pub adblock: Arc<AdBlock>,
+    pub tor: Arc<Tor>,
+    pub notify: Box<dyn Fn(Notice) + Send + Sync>,
+    /// Hosts you chose to open over plain http:// (HTTPS-only mode exceptions, this session).
+    pub allow_http: Mutex<std::collections::HashSet<String>>,
+    /// Request-time privacy switches, read by the network hook.
+    pub net_privacy: std::sync::RwLock<NetPrivacy>,
+    /// Sites extensions talk to (their own servers): never stripped of cookies or blocked.
+    pub ext_sites: std::sync::RwLock<Vec<String>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NetPrivacy {
+    pub trim_referrers: bool,
+    pub block_fonts: bool,
+    pub strip_hints: bool,
+    pub block_prefetch: bool,
+    pub skip_extensions: bool,
+}
+
+impl NetPrivacy {
+    pub fn from(s: &crate::store::Settings) -> Self {
+        NetPrivacy { trim_referrers: s.trim_referrers, block_fonts: s.block_third_party_fonts, strip_hints: s.fingerprint != "off", block_prefetch: s.block_prefetch, skip_extensions: s.adblock_skip_extensions }
+    }
+}
+
+impl Shared {
+    pub fn tor_notifier(self: &Arc<Self>) -> Arc<dyn Fn() + Send + Sync> {
+        let me = Arc::downgrade(self);
+        Arc::new(move || {
+            if let Some(s) = me.upgrade() {
+                (s.notify)(Notice::TorChanged);
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+pub fn test_shared() -> Arc<Shared> {
+    Arc::new(Shared {
+        store: Mutex::new(Store::in_memory()),
+        system_dark: AtomicBool::new(true),
+        adblock: AdBlock::new(true, crate::adblock::Level::Standard, &[], ""),
+        tor: Tor::new(),
+        notify: Box::new(|_| {}),
+        allow_http: Default::default(),
+        net_privacy: Default::default(),
+        ext_sites: Default::default(),
+    })
+}

@@ -1,0 +1,11 @@
+/target
+/profile
+/profile-private
+/profile-tor
+/profiles
+/data
+/extensions
+/tor
+/.cargo
+*.exe
+WebView2Loader.dll
