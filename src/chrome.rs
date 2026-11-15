@@ -105,6 +105,14 @@ fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
 
+/// First letter of a bookmark's name (falls back to its site).
+pub fn name_letter(title: &str, url: &str) -> String {
+    match title.chars().find(|c| c.is_alphanumeric()) {
+        Some(c) => c.to_uppercase().to_string(),
+        None => site_letter("", url),
+    }
+}
+
 /// First letter of a site for the tab/bookmark "dot".
 pub fn site_letter(title: &str, url: &str) -> String {
     let host = crate::adblock::host_of(url);
@@ -1232,7 +1240,7 @@ impl App {
             }
             let ic = Rect::from_min_size(pos2(r.left() + 6.0, cy - 8.0), Vec2::splat(16.0));
             p.rect_filled(ic, 4, pal.bg3);
-            p.text(ic.center(), Align2::CENTER_CENTER, site_letter(&title, &url), bold(9.5), pal.muted);
+            p.text(ic.center(), Align2::CENTER_CENTER, name_letter(&title, &url), bold(9.5), pal.muted);
             text_elided(&p, pos2(ic.right() + 6.0, cy), &title, font(12.5), pal.text, tw + 1.0, Align2::LEFT_CENTER);
             let ctrl = ctx.input(|i| i.modifiers.command);
             if resp.clicked() {

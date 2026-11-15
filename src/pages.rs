@@ -544,6 +544,14 @@ fn page(look: &Look, title: &str, _active: &str, main: &str) -> Resp {
     page_doc(look, title, "", "", &format!("<main>{main}</main>"))
 }
 
+/// First letter of a bookmark's name (falls back to its site).
+fn name_letter(title: &str, url: &str) -> String {
+    match title.chars().find(|c| c.is_alphanumeric()) {
+        Some(c) => c.to_uppercase().to_string(),
+        None => site_letter("", url),
+    }
+}
+
 fn site_letter(title: &str, url: &str) -> String {
     let host = host_of(url);
     host.trim_start_matches("www.").chars().next().or_else(|| title.trim().chars().next()).unwrap_or('•').to_uppercase().to_string()
@@ -583,7 +591,7 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
              <button class=\"tremove\" title=\"Remove\" aria-label=\"Remove\" onclick=\"api('bookmark/delete',{{id:{}}}).then(()=>this.parentNode.remove())\">×</button></div>",
             esc(&b.url),
             esc(&b.url),
-            esc(&site_letter(&b.title, &b.url)),
+            esc(&name_letter(&b.title, &b.url)),
             esc(&b.title),
             b.id
         ));
@@ -836,7 +844,7 @@ fn bookmarks(s: &Store, look: &Look) -> Resp {
             esc(&format!("{} {}", b.title, b.url).to_lowercase()),
             esc(&b.url),
             esc(&b.url),
-            esc(&site_letter(&b.title, &b.url)),
+            esc(&name_letter(&b.title, &b.url)),
             esc(&b.title),
             esc(&short_host(&b.url)),
             b.id,
