@@ -1072,7 +1072,11 @@ impl App {
             let n = self.addr.chars().count();
             out.state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(n))));
             out.state.store(&ctx, id);
+            // Fresh focus (e.g. a new tab): no suggestions until you type. The old list from the
+            // last edit would otherwise flash up and vanish.
             self.sugg_for = self.addr.clone();
+            self.sugg.clear();
+            self.sugg_sel = None;
         }
         if out.response.changed() || before != self.addr {
             self.addr_editing = true;

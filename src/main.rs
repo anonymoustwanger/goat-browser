@@ -1113,6 +1113,8 @@ impl App {
         if matches!(self.popup, Some((Popup::Suggest, _))) {
             self.popup = None;
         }
+        self.sugg.clear();
+        self.sugg_sel = None;
         self.ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("addr")));
     }
 
