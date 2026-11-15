@@ -100,7 +100,7 @@ struct Adv {
 }
 
 const DNS_CHOICES: &[(&str, &str)] = &[
-    ("off", "Off (use Windows DNS)"),
+    ("off", "Off (use OS DNS)"),
     ("quad9", "Quad9"),
     ("mullvad", "Mullvad"),
     ("mullvadAdblock", "Mullvad, blocks ads"),
@@ -1039,7 +1039,7 @@ impl eframe::App for SetupApp {
                 ui.painter().rect_stroke(card, 14, Stroke::new(1.0, LINE), StrokeKind::Inside);
                 let row = |i: f32| Rect::from_min_size(pos2(card.left() + 6.0, card.top() + 6.0 + i * 58.0), vec2(card.width() - 12.0, 58.0));
                 let mut adv = self.adv.clone();
-                self.select(ui, row(0.0), "Encrypted DNS", "Off uses your normal Windows DNS.", DNS_CHOICES, &mut adv.dns);
+                self.select(ui, row(0.0), "Encrypted DNS", "Off uses your OS DNS.", DNS_CHOICES, &mut adv.dns);
                 self.select(ui, row(1.0), "Theme", "Colours for Goatr and its pages.", THEME_CHOICES, &mut adv.theme);
                 self.select(ui, row(2.0), "Search engine", "Used when you type in the address bar.", SEARCH_CHOICES, &mut adv.search);
                 self.select(ui, row(3.0), "Ad blocker", "Strict can break a few sites.", ADBLOCK_CHOICES, &mut adv.adblock);

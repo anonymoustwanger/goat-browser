@@ -13,7 +13,7 @@ pub const DNS_PROVIDERS: &[(&str, &str, &str, &str)] = &[
     ("adguard", "AdGuard, blocks ads", "https://dns.adguard-dns.com/dns-query", "https://adguard.com/en/test.html"),
     ("nextdns", "NextDNS", "", "https://test.nextdns.io/"),
     ("custom", "Custom…", "", ""),
-    ("off", "Off (use Windows DNS)", "", ""),
+    ("off", "Off (use OS DNS)", "", ""),
 ];
 
 /// Goat's settings profiles: (id, name, description).
