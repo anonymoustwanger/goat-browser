@@ -29,6 +29,10 @@ pub enum Notice {
     Cookies(u64, CookieOp),
     /// Turn an extension (folder name) on or off.
     ExtensionEnabled(String, bool),
+    /// Settings → About → Check for updates.
+    CheckUpdate,
+    /// An update check finished (true = you asked for it).
+    UpdateChecked(Result<crate::updater::Found, String>, bool),
 }
 
 /// One cookie, as the cookie editor shows it.

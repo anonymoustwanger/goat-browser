@@ -24,6 +24,7 @@ mod shared;
 mod store;
 mod themes;
 mod tor;
+mod updater;
 #[cfg(windows)]
 mod winhooks;
 
@@ -130,6 +131,8 @@ pub enum Cmd {
     ShowTorCircuit(egui::Pos2),
     /// Ask Tor for new circuits, then reload the page.
     NewTorCircuit,
+    /// Install the downloaded update now (Goat closes and reopens).
+    InstallUpdate,
     /// Set the active tab's volume (1.0 = 100%).
     SetVolume(f32),
     /// Right-click menu: run the engine's own command (copy, paste, save image…).
@@ -330,6 +333,13 @@ pub struct App {
     pub profile_always: bool,
     /// The Tor circuit panel's contents (filled in by a background lookup).
     pub tor_circuit: Arc<Mutex<TorCircuitView>>,
+    /// A downloaded update waiting to be installed (Update button in the toolbar).
+    pub update: Option<updater::Ready>,
+    /// Newer version you have to download yourself (portable copy).
+    pub update_manual: Option<String>,
+    last_update_check: f64,
+    update_checking: bool,
+    update_started: bool,
     /// Page sound played from Goat.exe for Discord (experimental).
     #[cfg(windows)]
     relay: Option<audiorelay::Relay>,
@@ -541,6 +551,11 @@ fn main() -> eframe::Result<()> {
                 zoom_bubble_until: 0.0,
                 page_menu: None,
                 tor_circuit: Default::default(),
+                update: None,
+                update_manual: None,
+                last_update_check: f64::NEG_INFINITY,
+                update_checking: false,
+                update_started: false,
                 profile_badge: None,
                 choosing_profile: false,
                 frame_stats: (std::time::Instant::now(), 0, 0.0, 0.0),
@@ -1518,6 +1533,35 @@ impl App {
                 }
                 Notice::OpenTorTab => cmds.push(Cmd::NewTorTab),
                 Notice::OpenProfile(name) => cmds.push(Cmd::OpenProfile(name)),
+                Notice::CheckUpdate => self.check_update(true),
+                Notice::UpdateChecked(r, asked) => {
+                    self.update_checking = false;
+                    match r {
+                        Ok(updater::Found::Ready(u)) => {
+                            if asked || self.update.as_ref().map(|x| &x.version) != Some(&u.version) {
+                                self.toast(format!("Goat {} is ready. Click Update in the toolbar, or it installs when you close Goat.", u.version));
+                            }
+                            self.update = Some(u);
+                        }
+                        Ok(updater::Found::Manual(v)) => {
+                            if asked || self.update_manual.as_ref() != Some(&v) {
+                                self.toast(format!("Goat {v} is out. Click Update in the toolbar to download it."));
+                            }
+                            self.update_manual = Some(v);
+                        }
+                        Ok(updater::Found::UpToDate) => {
+                            if asked {
+                                self.toast(format!("Goat {} is up to date", updater::VERSION));
+                            }
+                        }
+                        Err(e) => {
+                            crashlog::debug(format!("update check: {e}"));
+                            if asked {
+                                self.toast(e);
+                            }
+                        }
+                    }
+                }
                 Notice::ExtensionEnabled(folder, on) => {
                     if !self.ext_ids_known {
                         self.toast("Applies once extensions have loaded");
@@ -1702,6 +1746,18 @@ impl App {
                     self.popup = Some((Popup::TorCircuit, at));
                     self.popup_had_focus = false;
                     self.popup_born = now(&self.ctx);
+                }
+            }
+            Cmd::InstallUpdate => {
+                if let Some(u) = self.update.clone() {
+                    if updater::run(&u, true) {
+                        self.update_started = true;
+                        self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+                    } else {
+                        self.toast("Couldn't start the update");
+                    }
+                } else if self.update_manual.is_some() {
+                    let _ = self.open_tab(frame, updater::RELEASES_PAGE, TabKind::Normal);
                 }
             }
             Cmd::NewTorCircuit => {
@@ -2200,10 +2256,31 @@ impl App {
         }
     }
 
+    /// Look for a newer Goat on a background thread (answer: Notice::UpdateChecked).
+    fn check_update(&mut self, asked: bool) {
+        if self.update_checking {
+            return;
+        }
+        self.update_checking = true;
+        self.last_update_check = now(&self.ctx);
+        let sh = self.sh.clone();
+        std::thread::spawn(move || {
+            let r = updater::check();
+            (sh.notify)(shared::Notice::UpdateChecked(r, asked));
+        });
+    }
+
     fn housekeeping(&mut self, ctx: &egui::Context) {
         let t = now(ctx);
         if t - self.last_housekeeping < 5.0 {
             return;
+        }
+        // Automatic updates: 30 s after starting, then every 6 hours (normal windows only).
+        if self.window_kind == TabKind::Normal && self.settings().auto_update && self.update.is_none() {
+            let due = if self.last_update_check == f64::NEG_INFINITY { t > 30.0 } else { t - self.last_update_check > 6.0 * 3600.0 };
+            if due {
+                self.check_update(false);
+            }
         }
         self.apply_discord_audio();
         let first = self.last_housekeeping == 0.0;
@@ -2502,6 +2579,12 @@ impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.sh.store.lock().unwrap().save();
         self.sh.tor.stop();
+        // A downloaded update installs once Goat has closed.
+        if let Some(u) = &self.update {
+            if self.settings().auto_update && !self.update_started {
+                updater::run(u, false);
+            }
+        }
     }
 }
 

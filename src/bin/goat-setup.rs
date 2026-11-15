@@ -241,6 +241,13 @@ fn main() -> eframe::Result<()> {
         let _ = uninstall(&exe_dir(), false, &|_, _| {});
         return Ok(());
     }
+    // Automatic update, started by Goat: no window; waits for Goat to close, installs, and
+    // (with --relaunch) opens it again.
+    if args.iter().any(|a| a == "--update") {
+        let dir = args.iter().find_map(|a| a.strip_prefix("--dir=")).map(PathBuf::from).or_else(|| installed().map(|e| e.0)).unwrap_or_else(default_dir);
+        silent_update(&dir, args.iter().any(|a| a == "--relaunch"));
+        return Ok(());
+    }
     let viewport = egui::ViewportBuilder::default()
         .with_title(if mode == Mode::Install { "Goat setup" } else { "Uninstall Goat" })
         .with_inner_size([640.0, 460.0])
@@ -427,7 +434,7 @@ const WEBVIEW2_LOADER: Option<&[u8]> = Some(include_bytes!("../../assets/WebView
 #[cfg(not(windows))]
 const WEBVIEW2_LOADER: Option<&[u8]> = None;
 
-fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &Adv, step: &dyn Fn(&str, f32)) -> Result<(), String> {
+fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: Option<&Adv>, step: &dyn Fn(&str, f32)) -> Result<(), String> {
     let exe_bytes = if rel.bundled {
         step("Unpacking Goat…", 0.4);
         BUNDLED_EXE.to_vec()
@@ -476,7 +483,9 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &A
     }
     let _ = std::fs::write(dir.join("THIRD-PARTY-NOTICES.txt"), include_str!("../../THIRD-PARTY-NOTICES.txt"));
     step("Saving your choices…", 0.9);
-    adv.save()?;
+    if let Some(adv) = adv {
+        adv.save()?;
+    }
     let marker = serde_json::json!({ "version": rel.version, "installed": chrono::Local::now().to_rfc3339() });
     let _ = std::fs::write(dir.join(MARKER), marker.to_string());
 
@@ -504,6 +513,37 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &A
     let _ = (desktop, make_default);
     step("Done", 1.0);
     Ok(())
+}
+
+fn silent_update(dir: &Path, relaunch: bool) {
+    let log = |m: &str| {
+        let _ = std::fs::write(std::env::temp_dir().join("goat-update.log"), format!("{} {m}\n", chrono::Local::now().to_rfc3339()));
+    };
+    let Some(rel) = bundled_release() else {
+        log("this installer has no Goat inside");
+        return;
+    };
+    // Wait (up to 2 minutes) until every Goat window has closed.
+    let exe = dir.join(EXE);
+    let probe = dir.join("Goat.updating.exe");
+    for _ in 0..240 {
+        if !exe.exists() || std::fs::rename(&exe, &probe).is_ok() {
+            let _ = std::fs::rename(&probe, &exe);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    #[cfg(windows)]
+    let desktop = desktop_link().exists();
+    #[cfg(not(windows))]
+    let desktop = false;
+    match install(&rel, dir, desktop, false, None, &|_, _| {}) {
+        Ok(()) => log(&format!("updated to {}", rel.version)),
+        Err(e) => log(&format!("update failed: {e}")),
+    }
+    if relaunch {
+        let _ = std::process::Command::new(&exe).current_dir(dir).spawn();
+    }
 }
 
 fn uninstall(dir: &Path, remove_data: bool, step: &dyn Fn(&str, f32)) -> Result<(), String> {
@@ -812,7 +852,7 @@ impl SetupApp {
             };
             let r = match mode {
                 Mode::Install => match rel {
-                    Some(rel) => install(&rel, &dir, desktop, make_default, &adv, &step),
+                    Some(rel) => install(&rel, &dir, desktop, make_default, Some(&adv), &step),
                     None => Err("No release to install.".into()),
                 },
                 Mode::Uninstall => uninstall(&dir, remove_data, &step),

@@ -204,6 +204,10 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
             sh.tor.start(sh.tor_notifier());
             return ok();
         }
+        "updates/check" => {
+            notify(Notice::CheckUpdate);
+            return ok();
+        }
         "tor/open" => {
             notify(Notice::OpenTorTab);
             return ok();
@@ -1352,6 +1356,11 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <section id="about">
     <h2>About</h2>
     <div class="card">
+      <label class="row"><span><b>Update automatically</b><small>Goat checks GitHub for new versions, downloads them in the background, and installs them when you close it (or when you click Update in the toolbar).</small></span>
+        TOGGLE_AUTOUPDATE
+      </label>
+      <div class="row"><span><b>Check for updates</b><small>You're on Goat VERSION.</small></span>
+        <button onclick="api('updates/check');this.textContent='Checking…';setTimeout(()=>this.textContent='Check now',4000)">Check now</button></div>
       <div class="row"><span><b>Goat VERSION</b><small>A browser written in Rust: the interface is native Rust (egui), pages render with Microsoft Edge WebView2, ads are blocked by Brave's adblock-rust engine.</small></span></div>
       <div class="row"><span><b>Your data</b><small>Settings, bookmarks and history are in <code>data</code>, cookies and logins in <code>profile</code>, next to Goat.exe. Crash reports go to <code>data\crash.log</code>.</small></span>
         <button onclick="api('restart')">Restart Goat</button></div>
@@ -1742,6 +1751,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_3PC", &toggle("block_third_party_cookies", st.block_third_party_cookies).replace(">", " data-restartkey=\"cookies\">"))
         .replace("TOGGLE_CLEAR", &toggle("clear_cookies_on_exit", st.clear_cookies_on_exit))
         .replace("TOGGLE_PASTE", &toggle("paste_uploads", st.paste_uploads))
+        .replace("TOGGLE_AUTOUPDATE", &toggle("auto_update", st.auto_update))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

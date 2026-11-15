@@ -68,6 +68,8 @@ pub struct Settings {
     pub disabled_extensions: Vec<String>,
     /// When a site asks for an image and one is in the clipboard, offer to paste it.
     pub paste_uploads: bool,
+    /// Download new versions in the background and install them when Goat closes.
+    pub auto_update: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -129,6 +131,7 @@ impl Default for Settings {
             private_extensions: Vec::new(),
             disabled_extensions: Vec::new(),
             paste_uploads: true,
+            auto_update: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),

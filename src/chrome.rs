@@ -654,6 +654,26 @@ impl App {
         let mut rx = nav.right() - 8.0;
         let cog = btn(rx - 32.0);
         rx -= 36.0;
+        // "Update" pill when a new version is ready.
+        if self.update.is_some() || self.update_manual.is_some() {
+            let label = "Update";
+            let w = text_width(ui, label, bold(12.5)) + 26.0;
+            let r = Rect::from_min_size(pos2(rx - w, cy - 14.0), vec2(w, 28.0));
+            rx -= w + 6.0;
+            let resp = ui.interact(r, Id::new("update-pill"), Sense::click());
+            let h = crate::anim::hover(&ctx, Id::new("update-pill-h"), resp.hovered(), 0.25);
+            let r = r.expand(1.5 * h);
+            crate::paint::accent_fill(&p, r, 14, pal);
+            p.text(r.center(), Align2::CENTER_CENTER, label, bold(12.5), pal.ink);
+            let tip = match (&self.update, &self.update_manual) {
+                (Some(u), _) => format!("Install Goat {} now (Goat restarts)", u.version),
+                (_, Some(v)) => format!("Download Goat {v}"),
+                _ => String::new(),
+            };
+            if resp.on_hover_text(tip).clicked() {
+                cmds.push(Cmd::InstallUpdate);
+            }
+        }
         // Profile logo (only when there's more than one profile): click for Profiles.
         if let Some((glyph, color)) = self.profile_badge.clone() {
             let r = btn(rx - 32.0);
