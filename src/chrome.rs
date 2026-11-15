@@ -508,11 +508,11 @@ impl App {
                         let screen = ctx.input(|i| i.viewport_rect());
                         let outside = p.y > strip.bottom() + 40.0 || p.y < strip.top() - 10.0 || !screen.contains(p);
                         if outside && self.tabs.len() > 1 {
-                            if self.tear_preview.as_ref().is_none_or(|t| t.3.is_some()) {
+                            if self.tear_preview.as_ref().is_none_or(|t| t.drop_at.is_some()) {
                                 let icon = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.favicon.as_ref()).filter(|_| self.settings().site_icons).map(|f| f.1.id());
-                                self.tear_preview = Some((title.clone(), icon, t_now, None));
+                                self.tear_preview = Some(crate::TearPreview { title: title.clone(), icon, born: t_now, drop_at: None, fade_from: None });
                             }
-                        } else if self.tear_preview.as_ref().is_some_and(|t| t.3.is_none()) {
+                        } else if self.tear_preview.as_ref().is_some_and(|t| t.drop_at.is_none()) {
                             self.tear_preview = None;
                         }
                         if let Some(d) = self.tab_drag.as_mut() {
@@ -570,9 +570,14 @@ impl App {
                 };
                 if moved && out {
                     cmds.push(Cmd::TearOff(did));
-                    // The preview settles and fades where the new window opens.
-                    if let Some(tp) = self.tear_preview.as_mut() {
-                        tp.3 = Some(t_now);
+                    // The preview stays where you let go until the new window is showing.
+                    let ppp = ctx.pixels_per_point();
+                    #[cfg(windows)]
+                    let at = crate::winhooks::cursor_pos().map(|(x, y)| pos2(x / ppp, y / ppp));
+                    #[cfg(not(windows))]
+                    let at = p;
+                    if let (Some(tp), Some(at)) = (self.tear_preview.as_mut(), at) {
+                        tp.drop_at = Some((t_now, at));
                     }
                 } else {
                     self.tear_preview = None;

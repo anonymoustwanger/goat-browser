@@ -39,6 +39,12 @@ pub enum Notice {
     CookiesPut(Vec<CookieInfo>),
     /// A tab dragged here from another Goat window.
     TabIn(String),
+    /// The window opened for a dragged-out tab is showing (the preview can go).
+    TearReady,
+    /// This hidden standby window takes a dragged-out tab.
+    StandbyAdopt(String),
+    /// Close the standby window (the setting was turned off).
+    StandbyQuit,
     /// An update check finished (true = you asked for it).
     UpdateChecked(Result<crate::updater::Found, String>, bool),
 }

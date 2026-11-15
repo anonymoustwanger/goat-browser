@@ -1447,6 +1447,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <section id="performance">
     <h2>Performance</h2>
     <div class="card">
+      <label class="row"><span><b>Instant windows for dragged-out tabs</b><small>Keeps one hidden Goat window ready, so a tab you drag out of the tab bar becomes a window straight away. Uses about 100–150 MB of memory. Off: a new window starts when you drop the tab (takes a moment).</small></span>
+        TOGGLE_STANDBY
+      </label>
       <label class="row"><span><b>CPU cores</b><small>How many of your THREADS processor threads Goat may use. Fewer leaves more for games and other apps; all is fastest for Goat. <em class="restart" data-restart="cpu" hidden>Applies now to Goat; pages pick it up after a restart.</em></small></span>
         <select data-key="cpu_cores" data-number="1" data-restartkey="cpu">COREOPTS</select>
       </label>
@@ -1909,6 +1912,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_PASTE", &toggle("paste_uploads", st.paste_uploads))
         .replace("TOGGLE_AUTOUPDATE", &toggle("auto_update", st.auto_update))
         .replace("TOGGLE_SITEICONS", &toggle("site_icons", st.site_icons))
+        .replace("TOGGLE_STANDBY", &toggle("tear_standby", st.tear_standby))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

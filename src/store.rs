@@ -72,6 +72,8 @@ pub struct Settings {
     pub auto_update: bool,
     /// Site icons on tabs and bookmarks (off: the first letter instead).
     pub site_icons: bool,
+    /// Keep a hidden window ready so tabs dragged out of the strip open instantly.
+    pub tear_standby: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -135,6 +137,7 @@ impl Default for Settings {
             paste_uploads: true,
             auto_update: true,
             site_icons: true,
+            tear_standby: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
@@ -441,7 +444,7 @@ pub fn private_dir() -> PathBuf {
     .clone()
 }
 
-fn process_alive(pid: u32) -> bool {
+pub fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }

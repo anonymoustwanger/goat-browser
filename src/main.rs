@@ -58,6 +58,9 @@ const PASTE_JS: &str = include_str!("paste.js");
 /// the window under the mouse).
 pub const DRAG_PREVIEW_TITLE: &str = "Goat tab drag";
 
+/// The standby window has taken a tab and is a normal window now.
+static STANDBY_ADOPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Where the built-in goatr:// pages live inside the webview.
 #[cfg(windows)]
 pub const INTERNAL_BASE: &str = "http://goatr.localhost";
@@ -219,6 +222,18 @@ pub enum Cmd {
 
 /// Normal tabs use the saved profile. Private tabs share an in-memory session that's wiped when
 /// Goat closes; Tor tabs do too, and route everything through Tor. Neither keeps history.
+/// The floating preview of a tab pulled out of the strip.
+#[derive(Clone)]
+pub struct TearPreview {
+    pub title: String,
+    pub icon: Option<egui::TextureId>,
+    pub born: f64,
+    /// Let go: (when, where on screen, in points). It stays there until the window shows.
+    pub drop_at: Option<(f64, egui::Pos2)>,
+    /// Fading out since.
+    pub fade_from: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabKind {
     Normal,
@@ -379,7 +394,13 @@ pub struct App {
     pub tab_drag: Option<(u32, f32, bool)>,
     /// The floating preview of a tab pulled out of the strip: (title, icon, appeared at,
     /// dropped at).
-    pub tear_preview: Option<(String, Option<egui::TextureId>, f64, Option<f64>)>,
+    pub tear_preview: Option<TearPreview>,
+    /// This is the hidden window kept ready for dragged-out tabs (until it takes one).
+    pub standby: bool,
+    /// Tell this process (the window a tab was dragged out of) when this window shows.
+    ready_pid: Option<u32>,
+    shown_frames: u32,
+    last_standby_check: f64,
     /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
     pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
@@ -515,6 +536,18 @@ fn main() -> eframe::Result<()> {
         .with_inner_size(launch_size().unwrap_or([1300.0, 860.0]))
         .with_min_inner_size([520.0, 320.0])
         .with_icon(app_icon());
+    // The standby window: one per profile, hidden until a dragged-out tab needs it.
+    let standby = std::env::args().any(|a| a == "--standby");
+    #[cfg(windows)]
+    let standby_pipe = if standby {
+        match instance::claim_standby(&launch.profile) {
+            Some(h) => Some(h),
+            None => return Ok(()), // there's one already
+        }
+    } else {
+        None
+    };
+    let viewport = if standby { viewport.with_visible(false).with_title(format!("Goat standby {}", std::process::id())) } else { viewport };
     let viewport = match launch_pos() {
         Some(p) => viewport.with_position(p),
         None => viewport,
@@ -627,6 +660,10 @@ fn main() -> eframe::Result<()> {
                 tab_rects: Default::default(),
                 tab_drag: None,
                 tear_preview: None,
+                standby,
+                ready_pid: std::env::args().find_map(|a| a.strip_prefix("--ready-pid=").and_then(|p| p.parse().ok())),
+                shown_frames: 0,
+                last_standby_check: 0.0,
                 site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
@@ -659,7 +696,32 @@ fn main() -> eframe::Result<()> {
             };
             app.window_kind = window_kind;
             #[cfg(windows)]
-            if window_kind == TabKind::Normal && store::launch().window.is_empty() {
+            #[cfg(windows)]
+            if let Some(h) = standby_pipe {
+                let sh = app.sh.clone();
+                let title = format!("Goat standby {}", std::process::id());
+                instance::serve_standby(h, move |req| match req {
+                    instance::StandbyReq::Adopt(url, r, tx) => {
+                        // Show it right here (the hidden window isn't drawing), then load the tab.
+                        STANDBY_ADOPTED.store(true, Ordering::SeqCst);
+                        winhooks::show_window_by_title(&title, r);
+                        (sh.notify)(shared::Notice::StandbyAdopt(url));
+                        let _ = tx.send(true);
+                    }
+                    // Hidden, so it isn't drawing frames: just go.
+                    instance::StandbyReq::Quit => std::process::exit(0),
+                });
+                // Gone with the window that started it (another window starts a new one).
+                if let Some(parent) = std::env::args().find_map(|a| a.strip_prefix("--standby-for=").and_then(|p| p.parse::<u32>().ok())) {
+                    std::thread::spawn(move || loop {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        if !STANDBY_ADOPTED.load(Ordering::SeqCst) && !store::process_alive(parent) {
+                            std::process::exit(0);
+                        }
+                    });
+                }
+            }
+            if window_kind == TabKind::Normal && store::launch().window.is_empty() && !standby {
                 let sh = app.sh.clone();
                 instance::listen(&store::launch().profile, move |req| {
                     (sh.notify)(match req {
@@ -678,12 +740,18 @@ fn main() -> eframe::Result<()> {
                     TabKind::Private => "private",
                     TabKind::Tor => "tor",
                 };
-                instance::listen_window(move |kind, profile, url| {
-                    let ok = kind == my_kind && profile == store::launch().profile;
-                    if ok {
-                        (sh.notify)(shared::Notice::TabIn(url));
+                instance::listen_window(move |req| match req {
+                    instance::WindowReq::Tab(kind, profile, url) => {
+                        let ok = kind == my_kind && profile == store::launch().profile;
+                        if ok {
+                            (sh.notify)(shared::Notice::TabIn(url));
+                        }
+                        ok
                     }
-                    ok
+                    instance::WindowReq::Ready => {
+                        (sh.notify)(shared::Notice::TearReady);
+                        true
+                    }
                 });
             }
             // No-GPU window: start with the normal window's cookies (logins carry over).
@@ -1236,9 +1304,17 @@ impl App {
     /// The window-shaped preview that follows a tab pulled out of the strip, and settles where
     /// the new window opens when you let go.
     fn draw_tear_preview(&mut self, ctx: &egui::Context) {
-        let Some((title, icon, born, dropped)) = self.tear_preview.clone() else { return };
+        let Some(tp) = self.tear_preview.clone() else { return };
+        let (title, icon, born) = (tp.title.clone(), tp.icon, tp.born);
         let t = now(ctx);
-        if dropped.is_some_and(|d| t - d > 0.45) {
+        // Waiting for the new window, but never forever.
+        if tp.fade_from.is_none() && tp.drop_at.is_some_and(|(d, _)| t - d > 5.0) {
+            if let Some(p) = self.tear_preview.as_mut() {
+                p.fade_from = Some(t);
+            }
+        }
+        let dropped = self.tear_preview.as_ref().and_then(|p| p.fade_from);
+        if dropped.is_some_and(|d| t - d > 0.3) {
             self.tear_preview = None;
             return;
         }
@@ -1247,7 +1323,7 @@ impl App {
         let cur = winhooks::cursor_pos().map(|(x, y)| egui::pos2(x / ppp, y / ppp));
         #[cfg(not(windows))]
         let cur = ctx.input(|i| i.pointer.latest_pos());
-        let Some(cur) = cur else { return };
+        let Some(cur) = tp.drop_at.map(|d| d.1).or(cur) else { return };
         let (w, h) = (300.0, 200.0);
         // The window is see-through around the card (shadow room).
         let pad = 18.0;
@@ -1277,8 +1353,8 @@ impl App {
             let (scale, op) = match dropped {
                 None => (anim::pop(((t - born) as f32).min(1.0), 0.8), ((t - born) as f32 / 0.08).clamp(0.0, 1.0)),
                 Some(d) => {
-                    let k = ((t - d) as f32 / 0.45).clamp(0.0, 1.0);
-                    (1.0 + 0.06 * anim::out_cubic(k), 1.0 - anim::in_cubic(k))
+                    let k = ((t - d) as f32 / 0.3).clamp(0.0, 1.0);
+                    (1.0 + 0.04 * anim::out_cubic(k), 1.0 - anim::in_cubic(k))
                 }
             };
             let center = card.center();
@@ -1331,10 +1407,14 @@ impl App {
             let me = std::process::id();
             if let Some((x, y)) = winhooks::cursor_pos() {
                 match instance::window_pid_at(x, y) {
-                    Some(pid) if pid == me => return,
+                    Some(pid) if pid == me => {
+                        self.tear_preview = None;
+                        return;
+                    }
                     Some(pid) => {
                         if instance::send_tab(pid, kind_s, &store::launch().profile, &url) {
                             self.close(id);
+                            self.tear_preview = None;
                             return;
                         }
                     }
@@ -1342,7 +1422,30 @@ impl App {
                 }
             }
         }
-        // Somewhere else: its own window (a lone tab just stays put).
+        // Somewhere else: its own window (a lone tab just stays put). The hidden standby
+        // window takes it at once; otherwise a new Goat starts and the preview waits for it.
+        let fade_now = |me: &mut Self| {
+            if let Some(p) = me.tear_preview.as_mut() {
+                p.fade_from = Some(now(&me.ctx));
+            }
+        };
+        let ppp = self.ctx.pixels_per_point();
+        let size = self.ctx.input(|i| i.viewport().inner_rect).map(|r| r.size()).unwrap_or(egui::vec2(1300.0, 860.0));
+        #[cfg(windows)]
+        if self.tabs.len() > 1 && kind == TabKind::Normal && !store::no_gpu_window() && self.settings().tear_standby {
+            if let Some((x, y)) = winhooks::cursor_pos() {
+                // Physical pixels for the standby window to place itself.
+                let rect = [x - 60.0 * ppp, y - 16.0 * ppp, size.x * ppp, size.y * ppp];
+                if instance::standby_adopt(&store::launch().profile, &url, rect) {
+                    self.close(id);
+                    fade_now(self);
+                    return;
+                }
+            }
+        }
+        if self.tabs.len() <= 1 {
+            fade_now(self);
+        }
         if self.tabs.len() > 1 {
             let window = match kind {
                 TabKind::Normal if store::no_gpu_window() => Some("nogpu"),
@@ -1360,9 +1463,10 @@ impl App {
                 if !prof.is_empty() {
                     cmd.args(["--profile", &prof]);
                 }
-                // Open where you let go, the size of this window, under the settling preview.
-                let ppp = self.ctx.pixels_per_point();
-                let size = self.ctx.input(|i| i.viewport().inner_rect).map(|r| r.size()).unwrap_or(egui::vec2(1300.0, 860.0));
+                // Open where you let go, the size of this window, under the waiting preview.
+                cmd.arg(format!("--ready-pid={}", std::process::id()));
+                #[cfg(not(windows))]
+                fade_now(self);
                 #[cfg(windows)]
                 if let Some((x, y)) = winhooks::cursor_pos() {
                     cmd.arg(format!("--pos={},{}", (x / ppp - 60.0).round(), (y / ppp - 16.0).round()));
@@ -1794,6 +1898,15 @@ impl App {
             }
             Ev::Notice(n) => match n {
                 Notice::StoreChanged => {
+                    #[cfg(windows)]
+                    if !self.standby && !self.settings().tear_standby {
+                        let p = store::launch().profile.clone();
+                        std::thread::spawn(move || {
+                            if instance::standby_alive(&p) {
+                                instance::standby_quit(&p);
+                            }
+                        });
+                    }
                     let s = self.settings();
                     *self.sh.net_privacy.write().unwrap() = shared::NetPrivacy::from(&s);
                     self.cpu_dirty = true;
@@ -1837,6 +1950,31 @@ impl App {
                     }
                     #[cfg(not(windows))]
                     let _ = list;
+                }
+                Notice::TearReady => {
+                    if let Some(p) = self.tear_preview.as_mut() {
+                        p.fade_from.get_or_insert(now(&self.ctx));
+                    }
+                }
+                Notice::StandbyAdopt(url) => {
+                    self.standby = false;
+                    if self.tabs.is_empty() {
+                        let _ = self.open_tab(frame, &url, TabKind::Normal);
+                    } else {
+                        self.load_active(&url);
+                    }
+                    let title = match store::launch().profile.as_str() {
+                        "" => "Goat".to_string(),
+                        p => format!("Goat — {p}"),
+                    };
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Visible(true));
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+                }
+                Notice::StandbyQuit => {
+                    if self.standby {
+                        self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+                    }
                 }
                 Notice::TabIn(url) => {
                     if let Err(e) = self.open_tab(frame, &url, self.window_kind) {
@@ -2651,11 +2789,29 @@ impl App {
         if t - self.last_housekeeping < 5.0 {
             return;
         }
+        // Standby window: keep one ready while a normal window of this profile is open.
+        #[cfg(windows)]
+        if t - self.last_standby_check > 15.0 && self.window_kind == TabKind::Normal && !store::no_gpu_window() && t > 20.0 {
+            self.last_standby_check = t;
+            let profile = store::launch().profile.clone();
+            let want = self.settings().tear_standby;
+            if !self.standby && want && !instance::standby_alive(&profile) {
+                if let Ok(exe) = std::env::current_exe() {
+                    let mut cmd = std::process::Command::new(exe);
+                    cmd.args(["--standby", "--new-window"]);
+                    cmd.arg(format!("--standby-for={}", std::process::id()));
+                    if !profile.is_empty() {
+                        cmd.args(["--profile", &profile]);
+                    }
+                    let _ = cmd.spawn();
+                }
+            }
+        }
         if store::no_gpu_window() && t - self.last_cookie_share > 30.0 {
             self.share_cookies_back(None);
         }
         // Automatic updates: 30 s after starting, then every 6 hours (normal windows only).
-        if self.window_kind == TabKind::Normal && self.settings().auto_update && self.update.is_none() {
+        if self.window_kind == TabKind::Normal && !self.standby && self.settings().auto_update && self.update.is_none() {
             let due = if self.last_update_check == f64::NEG_INFINITY { t > 30.0 } else { t - self.last_update_check > 6.0 * 3600.0 };
             if due {
                 self.check_update(false);
@@ -2906,6 +3062,14 @@ impl eframe::App for App {
         }
         crashlog::phase("frame: toolbar");
         self.draw_chrome(ui, &mut cmds);
+        // Opened for a tab dragged out of another window: tell it we're on screen.
+        self.shown_frames = self.shown_frames.saturating_add(1);
+        #[cfg(windows)]
+        if self.shown_frames >= 3 {
+            if let Some(pid) = self.ready_pid.take() {
+                std::thread::spawn(move || instance::send_ready(pid));
+            }
+        }
         crashlog::phase("frame: pop-up windows");
         self.draw_popups(ui.ctx(), &mut cmds);
         self.draw_tear_preview(ui.ctx());
