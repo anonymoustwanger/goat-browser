@@ -209,6 +209,7 @@ const DEFAULT_SETTINGS = {
   dns: { provider: 'quad9', nextdnsId: '', custom: '' },
   adblock: { enabled: true, level: 'standard', allowlist: [], customRules: '', skipExtensions: true }, // skipExtensions: never filter extensions' own requests
   cookies: { blockThirdParty: true, clearOnExit: false },
+  uploads: { paste: true }, // paste: offer the clipboard's image when a site asks for an image file
   extensions: { unpacked: [], hidden: [], pinned: null }, // pinned: ids shown in the toolbar
   proxy: { mode: 'system', type: 'socks5', host: '', port: '', bypass: '<local>', pacUrl: '', username: '', password: '' },
 };
@@ -2861,7 +2862,38 @@ function wirePagesIpc() {
     try { top = event.sender.getURL() || url; } catch { /* ignore */ }
     event.returnValue = { level: settings.privacy.fingerprint, webauthn: settings.privacy.webauthn, seed: fpSeed(top || url), chrome: CHROME_MAJOR, langs,
       googleCompat: isGoogleSignIn(url) ? firefoxUA() : '',
+      paste: !!(settings.uploads && settings.uploads.paste),
       extIds: event.sender.session === ses && event.senderFrame && !event.senderFrame.parent ? externallyConnectableIds(url) : [] };
+  });
+  // Paste images when uploading: the clipboard's image (copied pixels, or a copied image file).
+  ipcMain.handle('goat:clip-image', async () => {
+    const { nativeImage } = require('electron');
+    const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+    let items = [];
+    try { items = await clipboard.read(); } catch { return null; }
+    let bytes = null; let mime = '';
+    for (const it of items) {
+      const t = it.types.find((x) => /^image\//.test(x));
+      if (t) {
+        try { bytes = Buffer.from(await (await it.getType(t)).arrayBuffer()); mime = t; } catch { /* next */ }
+        if (bytes) break;
+      }
+      // A copied image file (file managers put file:// links on the clipboard).
+      if (it.types.includes('text/uri-list')) {
+        try {
+          const blob = await it.getType('text/uri-list');
+          const list = String(typeof blob === 'string' ? blob : await blob.text()).split(/\r?\n/).map((x) => x.trim()).filter((x) => x && !x.startsWith('#'));
+          if (list.length === 1 && /^file:\/\//.test(list[0])) {
+            const file = require('url').fileURLToPath(list[0]);
+            const ext = path.extname(file).slice(1).toLowerCase();
+            if (types[ext] && fs.statSync(file).size < 40 * 1024 * 1024) { bytes = fs.readFileSync(file); mime = types[ext]; break; }
+          }
+        } catch { /* not a file */ }
+      }
+    }
+    if (!bytes || bytes.length > 40 * 1024 * 1024) return null;
+    const size = nativeImage.createFromBuffer(bytes).getSize();
+    return { b64: bytes.toString('base64'), mime, w: size.width, h: size.height };
   });
   // A site wants a passkey / security key: ask before Windows shows its dialog.
   const webauthnAllowed = new Map(); // origin -> true (this run only)

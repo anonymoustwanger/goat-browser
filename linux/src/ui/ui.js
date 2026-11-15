@@ -495,7 +495,10 @@ let bmRenaming = null;
 let bmKnown = null; // ids seen last render, for entrance animation
 const FOLDER_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.8 4.2c0-.6.4-1 1-1h3.4l1.5 1.6h5.5c.6 0 1 .4 1 1v6.6c0 .6-.4 1-1 1H2.8c-.6 0-1-.4-1-1z" fill="currentColor" fill-opacity=".25"/></svg>';
 
-function bmLetter(url) {
+// First letter of the bookmark's name (its site if the name has no letters).
+function bmLetter(url, title) {
+  const m = /[\p{L}\p{N}]/u.exec(title || '');
+  if (m) return m[0].toUpperCase();
   try { return new URL(url).hostname.replace(/^www\./, '')[0] || '•'; } catch { return '•'; }
 }
 
@@ -520,7 +523,7 @@ function bmEl(b, list) {
   el.draggable = bmRenaming !== b.id;
   const ic = document.createElement('span');
   ic.className = 'ic';
-  if (b.type === 'folder') ic.innerHTML = FOLDER_ICON; else ic.textContent = bmLetter(b.url);
+  if (b.type === 'folder') ic.innerHTML = FOLDER_ICON; else ic.textContent = bmLetter(b.url, b.title);
   el.append(ic);
   if (bmRenaming === b.id) {
     const input = document.createElement('input');

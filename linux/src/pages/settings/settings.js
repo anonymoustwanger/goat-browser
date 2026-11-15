@@ -324,10 +324,12 @@ function cookieRow(c) {
     el('td', {}, value),
     el('td', { class: 'muted' }, fmtExpiry(c)),
     el('td', { class: 'muted small' }, (c.path !== '/' ? c.path + ' · ' : '') + flags),
-    el('td', {}, el('button', {
-      class: 'x', title: 'Delete cookie', 'aria-label': `Delete cookie ${c.name}`,
-      onclick: async () => { await api.cookies.remove([c]); cookies = cookies.filter((x) => x !== c); renderCookies(); },
-    }, '×')),
+    el('td', { class: 'rowbtns' },
+      el('button', { class: 'x', title: 'Edit everything', 'aria-label': `Edit cookie ${c.name}`, onclick: () => openCookieForm(c) }, '✎'),
+      el('button', {
+        class: 'x', title: 'Delete cookie', 'aria-label': `Delete cookie ${c.name}`,
+        onclick: async () => { await api.cookies.remove([c]); cookies = cookies.filter((x) => x !== c); renderCookies(); },
+      }, '×')),
   );
 }
 
@@ -366,6 +368,49 @@ function renderCookies() {
     }
   }
 }
+// Full editor: add a cookie, or change every part of one.
+let cookieEditing = null;
+const pad2 = (n) => String(n).padStart(2, '0');
+const toLocalInput = (secs) => { const d = new Date(secs * 1000); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+function openCookieForm(c) {
+  cookieEditing = c || null;
+  $('cookieformtitle').textContent = c ? 'Edit cookie' : 'Add cookie';
+  $('cf-name').value = c ? c.name : '';
+  $('cf-domain').value = c ? c.domain : '';
+  $('cf-path').value = c ? c.path : '/';
+  $('cf-value').value = c ? c.value : '';
+  $('cf-session').checked = c ? !!c.session : false;
+  $('cf-expires').value = toLocalInput(c && c.expirationDate ? c.expirationDate : Date.now() / 1000 + 30 * 86400);
+  $('cf-expires').disabled = $('cf-session').checked;
+  $('cf-secure').checked = c ? !!c.secure : true;
+  $('cf-httponly').checked = c ? !!c.httpOnly : false;
+  $('cf-samesite').value = c && ['lax', 'strict', 'no_restriction'].includes(c.sameSite) ? c.sameSite : 'lax';
+  $('cf-msg').textContent = '';
+  $('cookieform').hidden = false;
+  $('cf-name').focus();
+  $('cookieform').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+$('cf-session').addEventListener('change', () => { $('cf-expires').disabled = $('cf-session').checked; });
+$('cf-cancel').addEventListener('click', () => { $('cookieform').hidden = true; });
+$('cookieadd').addEventListener('click', () => openCookieForm(null));
+$('cookieform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const domain = $('cf-domain').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const exp = $('cf-expires').value ? new Date($('cf-expires').value).getTime() / 1000 : 0;
+  const sameSite = $('cf-samesite').value;
+  const cookie = {
+    name: $('cf-name').value.trim(), value: $('cf-value').value, domain, path: $('cf-path').value.trim() || '/',
+    hostOnly: !domain.startsWith('.'), session: $('cf-session').checked, expirationDate: $('cf-session').checked ? undefined : exp,
+    secure: $('cf-secure').checked || sameSite === 'no_restriction', httpOnly: $('cf-httponly').checked, sameSite,
+  };
+  if (!cookie.name || !cookie.domain) { $('cf-msg').textContent = 'A cookie needs a name and a site.'; return; }
+  try {
+    await api.cookies.set(cookie, cookieEditing);
+    $('cookieform').hidden = true;
+    open.add(domain.replace(/^\./, ''));
+    await loadCookies();
+  } catch (err) { $('cf-msg').textContent = "Couldn't save: " + (err.message || err); }
+});
 $('cookiesearch').addEventListener('input', renderCookies);
 $('cookiereload').addEventListener('click', loadCookies);
 $('cookieclear').addEventListener('click', async () => {

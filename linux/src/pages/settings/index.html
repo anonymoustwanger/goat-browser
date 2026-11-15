@@ -42,6 +42,9 @@
         <label class="row"><span><b>Reopen tabs on startup</b><small>Restores your tabs and tab groups.</small></span>
           <input type="checkbox" class="toggle" data-key="restoreTabs">
         </label>
+        <label class="row"><span><b>Paste images when uploading</b><small>When a site asks for an image and there's one in your clipboard, Goat offers to paste it instead of picking a file. Applies to pages opened from now on.</small></span>
+          <input type="checkbox" class="toggle" data-key="uploads.paste">
+        </label>
         <label class="row"><span><b>HTTPS-only mode</b><small>Upgrades http:// to https://. You can still opt in per site.</small></span>
           <input type="checkbox" class="toggle" data-key="httpsOnly">
         </label>
@@ -299,14 +302,28 @@
         </label>
       </div>
 
-      <h3>Cookie manager</h3>
+      <h3>Cookie editor</h3>
       <div class="card">
         <div class="toolbar">
           <input id="cookiesearch" placeholder="Search sites or cookie names" spellcheck="false">
           <span class="muted" id="cookiecount"></span>
+          <button id="cookieadd">Add cookie</button>
           <button id="cookiereload">Refresh</button>
           <button class="danger" id="cookieclear">Delete all</button>
         </div>
+        <form id="cookieform" class="cookieform" hidden>
+          <b id="cookieformtitle">Add cookie</b>
+          <div class="grid">
+            <label>Name<input id="cf-name" spellcheck="false" required></label>
+            <label>Site (domain)<input id="cf-domain" spellcheck="false" placeholder="example.com or .example.com" required></label>
+            <label>Path<input id="cf-path" spellcheck="false" placeholder="/"></label>
+            <label class="wide">Value<textarea id="cf-value" spellcheck="false" rows="3"></textarea></label>
+            <label>Expires<input id="cf-expires" type="datetime-local"></label>
+            <label>Same-site<select id="cf-samesite"><option value="lax">Lax</option><option value="strict">Strict</option><option value="no_restriction">None</option></select></label>
+            <label class="checks"><span><input type="checkbox" id="cf-session"> Session (deleted when Goat closes)</span><span><input type="checkbox" id="cf-secure"> Secure (HTTPS only)</span><span><input type="checkbox" id="cf-httponly"> HttpOnly (hidden from page scripts)</span></label>
+          </div>
+          <div class="formactions"><button type="submit" class="primary">Save cookie</button><button type="button" id="cf-cancel">Cancel</button><span class="muted" id="cf-msg"></span></div>
+        </form>
         <div id="cookielist" class="cookielist"></div>
       </div>
     </section>

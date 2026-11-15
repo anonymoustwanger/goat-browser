@@ -27,7 +27,8 @@ function tile(b, small) {
     icon.innerHTML = FOLDER_SVG;
   } else {
     const h = host(b.url);
-    icon.textContent = (h[0] || '•').toUpperCase();
+    const m = /[\p{L}\p{N}]/u.exec(b.title || '');
+    icon.textContent = (m ? m[0] : (h[0] || '•')).toUpperCase();
     icon.style.setProperty('--h', String(hue(h)));
   }
   const label = document.createElement('span');
