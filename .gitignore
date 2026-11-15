@@ -9,3 +9,6 @@
 /.cargo
 *.exe
 /WebView2Loader.dll
+
+# Release builds are kept in the repo
+!releases/**
