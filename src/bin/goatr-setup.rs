@@ -57,6 +57,27 @@ struct Release {
     exe_url: String,
     exe_size: u64,
     dll_url: Option<String>,
+    /// Install the copy of Goatr built into this installer instead of downloading.
+    bundled: bool,
+}
+
+/// The Goatr.exe built into this installer (empty in builds without one), so installing works
+/// offline; GitHub is only used when it has a newer version.
+const BUNDLED_EXE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/bundle/Goatr.exe"));
+const BUNDLED_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn bundled_release() -> Option<Release> {
+    (BUNDLED_EXE.len() > 1024).then(|| Release {
+        version: BUNDLED_VERSION.into(),
+        exe_url: String::new(),
+        exe_size: BUNDLED_EXE.len() as u64,
+        dll_url: None,
+        bundled: true,
+    })
+}
+
+fn version_parts(v: &str) -> Vec<u64> {
+    v.split(['.', '-']).map(|p| p.chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0)).collect()
 }
 
 #[derive(Default)]
@@ -188,6 +209,9 @@ fn latest_release() -> Result<Release, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
     let mut resp = agent()
         .get(&url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(6)))
+        .build()
         .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
@@ -211,13 +235,18 @@ fn latest_release() -> Result<Release, String> {
         exe_url: exe["browser_download_url"].as_str().unwrap_or("").to_string(),
         exe_size: exe["size"].as_u64().unwrap_or(0),
         dll_url: dll.and_then(|d| d["browser_download_url"].as_str().map(String::from)),
+        bundled: false,
     })
 }
 
 fn fetch_release(shared: Arc<Mutex<Shared>>, ctx: egui::Context) {
     shared.lock().unwrap().release = None;
     std::thread::spawn(move || {
-        let r = latest_release();
+        let r = match (latest_release(), bundled_release()) {
+            (Ok(gh), Some(b)) if version_parts(&gh.version) > version_parts(&b.version) => Ok(gh),
+            (_, Some(b)) => Ok(b),
+            (r, None) => r,
+        };
         shared.lock().unwrap().release = Some(r);
         ctx.request_repaint();
     });
@@ -262,8 +291,13 @@ const WEBVIEW2_LOADER: Option<&[u8]> = Some(include_bytes!("../../assets/WebView
 const WEBVIEW2_LOADER: Option<&[u8]> = None;
 
 fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, step: &dyn Fn(&str, f32)) -> Result<(), String> {
-    step("Downloading Goatr…", 0.0);
-    let exe_bytes = download(&rel.exe_url, rel.exe_size, |f| step("Downloading Goatr…", f * 0.8))?;
+    let exe_bytes = if rel.bundled {
+        step("Unpacking Goatr…", 0.4);
+        BUNDLED_EXE.to_vec()
+    } else {
+        step("Downloading Goatr…", 0.0);
+        download(&rel.exe_url, rel.exe_size, |f| step("Downloading Goatr…", f * 0.8))?
+    };
     let dll_bytes = match &rel.dll_url {
         Some(u) => Some(download(u, 0, |_| {})?),
         None => WEBVIEW2_LOADER.map(|b| b.to_vec()),
@@ -425,26 +459,37 @@ fn desktop_link() -> PathBuf {
     desk.join(format!("{APP}.lnk"))
 }
 
+/// A .lnk to Goatr carrying Goatr's taskbar id, so a pinned shortcut and the running window
+/// share one taskbar button.
 #[cfg(windows)]
 fn shortcut(link: &Path, dir: &Path) -> Result<(), String> {
+    use windows::core::{Interface, HSTRING};
+    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
     if let Some(p) = link.parent() {
         let _ = std::fs::create_dir_all(p);
     }
     let exe = dir.join(EXE);
-    let q = |p: &Path| p.display().to_string().replace('\'', "''");
-    let script = format!(
-        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.WorkingDirectory='{}';$s.IconLocation='{},0';$s.Description='Goatr browser';$s.Save()",
-        q(link),
-        q(&exe),
-        q(dir),
-        q(&exe)
-    );
-    let ok = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
-        .creation_flags_hidden()
-        .status()
-        .is_ok_and(|s| s.success());
-    if ok { Ok(()) } else { Err("Couldn't create the shortcut.".into()) }
+    let r: windows::core::Result<()> = unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        (|| {
+            let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            sl.SetPath(&HSTRING::from(exe.as_os_str()))?;
+            sl.SetWorkingDirectory(&HSTRING::from(dir.as_os_str()))?;
+            sl.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
+            sl.SetDescription(&HSTRING::from("Goatr browser"))?;
+            let ps: IPropertyStore = sl.cast()?;
+            let v = PROPVARIANT::from(APP);
+            ps.SetValue(&PKEY_AppUserModel_ID, &v)?;
+            ps.Commit()?;
+            let pf: IPersistFile = sl.cast()?;
+            pf.Save(&HSTRING::from(link.as_os_str()), true)
+        })()
+    };
+    r.map_err(|e| format!("Couldn't create the shortcut {}: {e}", link.display()))
 }
 
 /// A .reg file: one `reg import` instead of dozens of `reg add`.
@@ -793,7 +838,7 @@ impl eframe::App for SetupApp {
                 let (rel, sub, sub_col) = {
                     let s = self.shared.lock().unwrap();
                     match &s.release {
-                        None => (None, "Checking GitHub for the latest Goatr…".to_string(), MUTED),
+                        None => (None, "Getting Goatr ready…".to_string(), MUTED),
                         Some(Ok(r)) => {
                             let sub = match &self.existing {
                                 Some((_, v)) if !v.is_empty() && v == &r.version => format!("Goatr {} is installed. Reinstall it to repair.", r.version),

@@ -1,6 +1,12 @@
 // Give the UI thread an 8 MB stack on Windows (the default is only 1 MB).
 fn main() {
     println!("cargo:rerun-if-changed=assets");
+    // The installer embeds bundle/Goatr.exe; an empty one means "download from GitHub".
+    let bundle = std::path::Path::new("bundle/Goatr.exe");
+    if !bundle.exists() {
+        let _ = std::fs::create_dir_all("bundle");
+        let _ = std::fs::write(bundle, b"");
+    }
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.contains("windows-msvc") {
         println!("cargo:rustc-link-arg-bins=/STACK:8388608");
