@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' goat://static; style-src goat://static">
+  <title>Can't open page</title>
+  <script src="goat://static/theme.js"></script>
+  <link rel="stylesheet" href="goat://static/themes.css">
+  <link rel="stylesheet" href="goat://static/shared.css">
+</head>
+<body class="err">
+  <main>
+    <h1 id="title">Can't reach this page</h1>
+    <p class="host" id="host"></p>
+    <div class="why"><span id="why"></span><br><code id="code"></code></div>
+    <div class="actions">
+      <button class="primary" id="retry">Try again</button>
+      <button class="risky" id="http" hidden>Open over plain HTTP (not private)</button>
+    </div>
+  </main>
+  <script src="error.js"></script>
+</body>
+</html>

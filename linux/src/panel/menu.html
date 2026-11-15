@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-theme="midnight" data-motion="system" data-gradients="on">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+  <title>Menu</title>
+  <link rel="stylesheet" href="../pages/static/themes.css">
+  <link rel="stylesheet" href="adblock.css">
+  <link rel="stylesheet" href="menu.css">
+</head>
+<body>
+  <div class="card menu" id="card" role="menu" aria-label="Goatr menu">
+    <div class="group">
+      <button role="menuitem" data-do="newtab"><i data-icon="plus"></i>New tab<kbd>Ctrl+T</kbd></button>
+      <button role="menuitem" data-do="private" class="priv"><i data-icon="mask"></i>New private tab<kbd>Ctrl+Shift+N</kbd></button>
+      <button role="menuitem" data-do="privatewindow" class="priv"><i data-icon="window"></i>New private window<kbd>Ctrl+Shift+P</kbd></button>
+      <button role="menuitem" data-do="torwindow" class="tor"><i data-icon="onion"></i>New Tor window<kbd>Alt+Shift+N</kbd></button>
+    </div>
+    <div class="group">
+      <button role="menuitem" data-do="history"><i data-icon="clock"></i>History<kbd>Ctrl+H</kbd></button>
+      <button role="menuitem" data-do="bookmark" data-web="1"><i data-icon="star"></i>Bookmark this page<kbd>Ctrl+D</kbd></button>
+      <button role="menuitemcheckbox" data-do="bookmarksbar" id="bmbar"><i data-icon="bar"></i>Show bookmarks bar<kbd>Ctrl+Shift+B</kbd></button>
+      <button role="menuitem" data-do="downloads"><i data-icon="download"></i>Downloads folder</button>
+    </div>
+    <div class="group zoomrow" role="group" aria-label="Zoom">
+      <span class="zl"><i data-icon="zoom"></i>Zoom</span>
+      <button class="zb" data-do="zoomout" aria-label="Zoom out" title="Zoom out (Ctrl+−)">−</button>
+      <button class="zv" data-do="zoomreset" id="zoomval" title="Reset to 100% (Ctrl+0)">100%</button>
+      <button class="zb" data-do="zoomin" aria-label="Zoom in" title="Zoom in (Ctrl+=)">+</button>
+      <button class="zb fs" data-do="fullscreen" aria-label="Full screen" title="Full screen (F11)"><i data-icon="expand"></i></button>
+    </div>
+    <div class="group">
+      <button role="menuitem" data-do="find"><i data-icon="search"></i>Find in page<kbd>Ctrl+F</kbd></button>
+      <button role="menuitem" data-do="print" data-web="1"><i data-icon="print"></i>Print…<kbd>Ctrl+P</kbd></button>
+    </div>
+    <div class="group">
+      <button role="menuitem" data-do="adblock"><i data-icon="shield"></i>Ad blocker</button>
+      <button role="menuitem" data-do="cleardata"><i data-icon="trash"></i>Clear browsing data…<kbd>Ctrl+Shift+Del</kbd></button>
+    </div>
+    <div class="group">
+      <button role="menuitem" data-do="update" id="updateitem" class="upd" hidden><i data-icon="download"></i><span id="updatelabel">Update Goatr</span></button>
+      <button role="menuitem" data-do="profiles"><i data-icon="user"></i>Profile<span class="ver" id="profname"></span></button>
+      <button role="menuitem" data-do="settings"><i data-icon="cog"></i>Settings<kbd>Ctrl+,</kbd></button>
+      <button role="menuitem" data-do="about"><i data-icon="info"></i>About Goatr<span class="ver" id="ver"></span></button>
+      <button role="menuitem" data-do="quit" class="quit"><i data-icon="power"></i>Exit</button>
+    </div>
+  </div>
+  <script src="menu.js"></script>
+</body>
+</html>

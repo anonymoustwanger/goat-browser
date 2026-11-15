@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' goat://static; style-src goat://static">
+  <title>History</title>
+  <script src="goat://static/theme.js"></script>
+  <link rel="stylesheet" href="goat://static/themes.css">
+  <link rel="stylesheet" href="goat://static/shared.css">
+  <link rel="stylesheet" href="goat://static/history.css">
+</head>
+<body class="historypage">
+  <div class="wrap">
+    <header class="hhead">
+      <h1>History</h1>
+      <input id="q" type="search" placeholder="Search history" spellcheck="false" autocomplete="off" aria-label="Search history">
+    </header>
+    <div class="hbar">
+      <span class="muted" id="count"></span>
+      <span class="hacts">
+        <button id="delsel" hidden>Delete selected</button>
+        <select id="range" aria-label="Clear history from">
+          <option value="">Clear history…</option>
+          <option value="hour">Last hour</option>
+          <option value="day">Last 24 hours</option>
+          <option value="week">Last 7 days</option>
+          <option value="month">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
+        <button id="keep" title="Choose how long history is kept">Settings</button>
+      </span>
+    </div>
+    <main id="list" class="hlist"></main>
+    <p class="hempty" id="empty" hidden></p>
+    <button id="more" class="more" hidden>Show more</button>
+  </div>
+  <script src="history.js"></script>
+</body>
+</html>

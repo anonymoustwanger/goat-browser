@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="midnight" data-motion="system" data-gradients="on">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+  <title>Goatr Shield</title>
+  <link rel="stylesheet" href="../pages/static/themes.css">
+  <link rel="stylesheet" href="adblock.css">
+</head>
+<body>
+  <div class="card" id="card" role="dialog" aria-label="Ad blocker">
+    <header>
+      <div class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 2.6 4.2 5.5v6c0 4.9 3.3 8.2 7.8 9.8 4.5-1.6 7.8-4.9 7.8-9.8v-6z"/><path class="tick" d="m8.6 12.2 2.4 2.4 4.6-4.9"/></svg>
+      </div>
+      <div class="title">
+        <b>Goatr Shield</b>
+        <small id="status">Loading…</small>
+      </div>
+      <label class="switch" title="Turn the ad blocker on or off everywhere">
+        <input type="checkbox" id="master" aria-label="Ad blocker on">
+        <span></span>
+      </label>
+    </header>
+
+    <section class="site" id="sitebox">
+      <div class="count">
+        <span class="num" id="blocked">0</span>
+        <span class="lbl">blocked on this page</span>
+      </div>
+      <div class="sitename" id="sitename"></div>
+      <label class="row" id="siterow">
+        <span><b id="sitelabel">Block on this site</b><small id="sitehint">Turn off if the site looks broken.</small></span>
+        <span class="switch small"><input type="checkbox" id="sitetoggle"><span></span></span>
+      </label>
+    </section>
+
+    <section>
+      <div class="heading">Blocking level</div>
+      <div class="segments" role="radiogroup" aria-label="Blocking level">
+        <button data-level="ads" role="radio">Ads</button>
+        <button data-level="standard" role="radio">Standard</button>
+        <button data-level="strict" role="radio">Strict</button>
+        <span class="thumb" aria-hidden="true"></span>
+      </div>
+      <p class="desc" id="leveldesc"></p>
+      <ul class="levelinfo" id="levelinfo"></ul>
+    </section>
+
+    <footer>
+      <div class="total"><span id="total">0</span> blocked all-time</div>
+      <div class="links">
+        <button id="allowlink">Allowed sites</button>
+        <button id="filterslink">Custom filters</button>
+      </div>
+    </footer>
+  </div>
+  <script src="adblock.js"></script>
+</body>
+</html>

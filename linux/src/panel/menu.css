@@ -1,0 +1,37 @@
+.menu { padding: 6px; }
+.menu .group { display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.menu .group:last-child { border-bottom: 0; }
+.menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
+  background: none; color: var(--text); font-size: 13px; text-align: left;
+  transition: background-color var(--dur-1) ease;
+}
+.menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--bg-3); outline: none; }
+.menu button:disabled { color: var(--muted); opacity: .55; cursor: default; }
+.menu i { display: grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--muted); }
+.menu i svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.menu button:hover i { color: var(--accent); }
+.menu kbd, .menu .ver { margin-left: auto; font: inherit; font-size: 11.5px; color: var(--muted); }
+.menu .priv i { color: #a78bfa; }
+.menu .priv:hover i { color: #c4b5fd; }
+.menu #bmbar.checked::after { content: ""; }
+.menu #bmbar.checked i { color: var(--accent); }
+.menu #bmbar.checked i svg { fill: currentColor; fill-opacity: .25; }
+.menu .quit:hover { color: var(--danger); }
+.menu .quit:hover i { color: var(--danger); }
+.zoomrow { flex-direction: row !important; align-items: center; gap: 4px; padding: 6px 4px 6px 10px !important; }
+.zoomrow .zl { display: flex; align-items: center; gap: 10px; flex: 1; font-size: 13px; }
+.zoomrow .zl i { color: var(--muted); }
+.menu .zb, .menu .zv {
+  width: auto; min-width: 32px; justify-content: center; padding: 5px 8px; border: 1px solid var(--line); background: var(--bg);
+  font-size: 15px; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.menu .zv { min-width: 58px; font-size: 12.5px; }
+.menu .zb.fs i { width: 14px; height: 14px; color: var(--text); }
+.menu button { white-space: nowrap; }
+.menu kbd { padding-left: 12px; }
+
+.menu .tor i { color: #b57cf5; }
+.menu .tor:hover i { color: #d3b0ff; }
+.menu .upd { color: var(--accent); font-weight: 600; }
+.menu .upd i { color: var(--accent); }

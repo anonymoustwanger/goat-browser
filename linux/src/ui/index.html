@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="midnight" data-motion="system" data-gradients="on">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: crx:">
+  <title>Goatr</title>
+  <link rel="stylesheet" href="../pages/static/themes.css">
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <linearGradient id="shieldgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color: var(--accent)"/><stop offset="1" style="stop-color: var(--accent-2)"/></linearGradient>
+  </defs></svg>
+  <div id="tabstrip">
+    <div id="tabs" role="tablist"></div>
+    <button id="newtab" class="icon" title="New tab (Ctrl+T)" aria-label="New tab">
+      <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+    </button>
+  </div>
+
+  <div id="navbar">
+    <button id="back" class="icon" title="Back (Alt+Left)" aria-label="Back">
+      <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>
+    </button>
+    <button id="forward" class="icon" title="Forward (Alt+Right)" aria-label="Forward">
+      <svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5"/></svg>
+    </button>
+    <button id="reload" class="icon" title="Reload (Ctrl+R)" aria-label="Reload">
+      <svg class="i-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.5v3h-3"/></svg>
+      <svg class="i-stop" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+
+    <form id="addressform" autocomplete="off">
+      <span id="sec" title=""></span>
+      <input id="address" spellcheck="false" placeholder="Search privately or enter address">
+      <button type="button" id="trbtn" class="trbtn" hidden aria-label="Translate page">
+        <svg viewBox="0 0 16 16"><path d="M2 3.5h6M5 2v1.5M3.2 3.5c.5 2.3 2 4 4 5M6.8 3.5c-.4 2-1.8 3.8-4.3 5.2M8.5 14l2.6-6.5L13.7 14M9.4 12h3.4"/></svg>
+      </button>
+      <button type="button" id="star" class="star" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page" aria-pressed="false">
+        <svg viewBox="0 0 16 16"><path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg>
+      </button>
+    </form>
+
+    <div id="findbar" hidden>
+      <input id="findinput" spellcheck="false" placeholder="Find in page">
+      <span id="findcount"></span>
+      <button id="findprev" class="icon small" aria-label="Previous match"><svg viewBox="0 0 16 16"><path d="m4 10 4-4 4 4"/></svg></button>
+      <button id="findnext" class="icon small" aria-label="Next match"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></button>
+      <button id="findclose" class="icon small" aria-label="Close find"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    </div>
+    <button id="torbtn" hidden title="Tor" aria-label="Tor">
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.2"/><circle cx="8" cy="9" r="3.4"/><circle cx="8" cy="9" r="1.6"/><path d="M8 3.8c0-1.2.6-2 1.6-2.4"/></svg>
+      <span id="torlabel">Tor</span>
+    </button>
+    <button id="shield" title="" aria-haspopup="menu">
+      <svg viewBox="0 0 16 16"><path d="M8 1.8 2.8 3.7v4c0 3.2 2.2 5.4 5.2 6.5 3-1.1 5.2-3.3 5.2-6.5v-4z"/></svg>
+      <span id="blocked">0</span>
+    </button>
+    <button id="profilebtn" hidden aria-haspopup="menu"><span id="profileinitial"></span></button>
+    <button id="settings" class="icon" title="Menu" aria-label="Menu" aria-haspopup="menu">
+      <svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </div>
+
+  <nav id="bookmarks" aria-label="Bookmarks">
+    <div id="bmitems"></div>
+    <button id="bmmore" class="bm more" hidden aria-label="More bookmarks" title="More bookmarks">»</button>
+    <span id="bmempty" class="bmempty" hidden>Press Ctrl+D or click the ☆ to bookmark a page. Drag a tab here to bookmark it.</span>
+  </nav>
+  <div id="progress" aria-hidden="true"></div>
+  <div id="toast" role="status" hidden></div>
+  <script src="ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="midnight" data-motion="system" data-gradients="on">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:">
+  <title>Extensions</title>
+  <link rel="stylesheet" href="../pages/static/themes.css">
+  <link rel="stylesheet" href="adblock.css">
+  <link rel="stylesheet" href="extensions.css">
+</head>
+<body>
+  <div class="card" id="card" role="dialog" aria-label="Extensions">
+    <header class="slim">
+      <div class="title"><b>Extensions</b><small id="sub"></small></div>
+    </header>
+    <ul class="exts" id="list" role="list"></ul>
+    <p class="hint" id="hint">Click the pin to show or hide an extension's button in the toolbar.</p>
+    <p class="empty" id="empty" hidden>No extensions yet. Add password managers, dark mode, and more from the Chrome Web Store.</p>
+    <footer class="extfoot">
+      <button id="store">Get extensions</button>
+      <button id="manage">Manage extensions</button>
+    </footer>
+  </div>
+  <script src="extensions.js"></script>
+</body>
+</html>

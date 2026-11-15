@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en" data-theme="midnight" data-motion="system" data-gradients="on">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <title>Goatr</title>
+  <link rel="stylesheet" href="../pages/static/themes.css">
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <div class="bar">
+    <span class="bartitle" id="bartitle">Goatr setup</span>
+    <button class="wbtn" id="min" aria-label="Minimize"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
+    <button class="wbtn close" id="x" aria-label="Close"><svg viewBox="0 0 12 12"><path d="m2.5 2.5 7 7m0-7-7 7"/></svg></button>
+  </div>
+
+  <main>
+    <!-- install: choose -->
+    <section class="step" id="s-welcome" hidden>
+      <div class="hero">
+        <img src="../icon.png" alt="" class="logo">
+        <div>
+          <h1 id="w-title">Install Goatr</h1>
+          <p class="muted" id="w-sub">Private, fast, and yours. Takes about a minute.</p>
+        </div>
+      </div>
+      <div class="card">
+        <label class="opt"><input type="checkbox" id="o-desktop" checked><span><b>Desktop shortcut</b><small>Put Goatr on your desktop.</small></span></label>
+        <label class="opt"><input type="checkbox" id="o-default"><span><b>Make Goatr my default browser</b><small>Opens Windows settings after installing, so links open in Goatr.</small></span></label>
+        <div class="opt loc"><span><b>Install location</b><small id="o-dir"></small></span><button class="ghost" id="o-change">Change…</button></div>
+      </div>
+      <p class="fine">Installs just for you, no admin needed. Your profile in <code>%APPDATA%\Goatr</code> is kept.</p>
+      <div class="actions"><button class="ghost" id="w-cancel">Cancel</button><button class="primary" id="w-go">Install</button></div>
+    </section>
+
+    <!-- uninstall: confirm -->
+    <section class="step" id="s-confirm" hidden>
+      <div class="hero">
+        <img src="../icon.png" alt="" class="logo">
+        <div>
+          <h1>Uninstall Goatr</h1>
+          <p class="muted" id="c-sub">Goatr will be removed from this computer.</p>
+        </div>
+      </div>
+      <div class="card">
+        <label class="opt"><input type="checkbox" id="o-profile"><span><b>Also delete my profile</b><small>Cookies, history, bookmarks, settings and extensions. Leave this off to keep them for a later reinstall.</small><small class="path" id="c-profile"></small></span></label>
+      </div>
+      <div class="actions"><button class="ghost" id="c-cancel">Keep Goatr</button><button class="danger" id="c-go">Uninstall</button></div>
+    </section>
+
+    <!-- progress -->
+    <section class="step" id="s-work" hidden>
+      <div class="center">
+        <img src="../icon.png" alt="" class="logo big spin">
+        <h1 id="p-title">Installing…</h1>
+        <p class="muted" id="p-step">Getting ready…</p>
+        <div class="progress"><i id="p-bar"></i></div>
+        <p class="pct" id="p-pct">0%</p>
+      </div>
+    </section>
+
+    <!-- done -->
+    <section class="step" id="s-done" hidden>
+      <div class="center">
+        <div class="tick"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
+        <h1 id="d-title">Goatr is ready</h1>
+        <p class="muted" id="d-sub">Find it in the Start menu any time.</p>
+      </div>
+      <div class="actions"><button class="ghost" id="d-close">Close</button><button class="primary" id="d-open">Open Goatr</button></div>
+    </section>
+
+    <!-- error -->
+    <section class="step" id="s-error" hidden>
+      <div class="center">
+        <div class="tick bad"><svg viewBox="0 0 24 24"><path d="M12 7v6M12 16.5v.5"/></svg></div>
+        <h1>Something got in the way</h1>
+        <p class="muted" id="e-msg"></p>
+      </div>
+      <div class="actions"><button class="ghost" id="e-close">Close</button><button class="primary" id="e-retry">Try again</button></div>
+    </section>
+  </main>
+  <script src="setup-ui.js"></script>
+</body>
+</html>

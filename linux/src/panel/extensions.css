@@ -1,0 +1,31 @@
+header.slim { padding: 14px 16px 12px; }
+.exts { list-style: none; margin: 0; padding: 6px; max-height: 360px; overflow-y: auto; }
+.exts li { display: flex; align-items: center; gap: 2px; border-radius: 10px; animation: chip var(--dur-2) var(--ease-out) both; }
+.exts li:hover { background: var(--bg); }
+.name {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 0; background: none; text-align: left; border-radius: 10px;
+}
+.name:disabled { cursor: default; }
+.ico { width: 22px; height: 22px; border-radius: 6px; flex: none; object-fit: contain; }
+.ico.letter { display: grid; place-items: center; background: var(--grad-accent); color: var(--accent-ink); font-weight: 700; font-size: 12px; }
+.label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iconbtn {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; border: 0; background: none;
+  border-radius: 8px; color: var(--muted); transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+.iconbtn:hover { background: var(--bg-3); color: var(--text); }
+.iconbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.pin.on { color: var(--accent); }
+.pin.on svg { fill: currentColor; fill-opacity: .25; }
+.empty { margin: 0; padding: 18px 16px; color: var(--muted); }
+.extfoot { justify-content: flex-end; flex-wrap: nowrap; gap: 6px; border-top: 1px solid var(--line); }
+.extfoot button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; }
+.extfoot button:hover { border-color: var(--muted); }
+.extfoot #store { margin-right: auto; background: var(--grad-accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.extfoot button { white-space: nowrap; }
+.extfoot #store { margin-right: 0; }
+.extfoot { justify-content: space-between; }
+.hint { margin: 0; padding: 0 16px 10px; color: var(--muted); font-size: 12px; }
+.pin { border: 1px solid transparent; }
+.pin.on { background: color-mix(in srgb, var(--accent) 14%, transparent); }

@@ -1,0 +1,52 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--grad-page); color: var(--text); font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden; user-select: none; border: 1px solid var(--line); }
+.bar { height: 38px; display: flex; align-items: center; padding-left: 16px; -webkit-app-region: drag; flex: none; }
+.bartitle { font-size: 12.5px; color: var(--muted); margin-right: auto; }
+.wbtn { -webkit-app-region: no-drag; width: 46px; height: 38px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.wbtn svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.3; fill: none; }
+.wbtn:hover { background: var(--bg-3); color: var(--text); }
+.wbtn.close:hover { background: #c42b1c; color: #fff; }
+main { flex: 1; padding: 6px 36px 28px; display: flex; }
+.step { flex: 1; display: flex; flex-direction: column; animation: in var(--dur-3) var(--ease-out); }
+.step[hidden] { display: none; }
+@keyframes in { from { opacity: 0; transform: translateY(8px); } }
+.hero { display: flex; align-items: center; gap: 18px; margin: 10px 0 22px; }
+.logo { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35); flex: none; }
+.logo.big { width: 76px; height: 76px; border-radius: 19px; margin-bottom: 18px; }
+.spin { animation: bob 1.6s var(--ease-out) infinite; }
+@keyframes bob { 50% { transform: translateY(-5px) rotate(-3deg); } }
+h1 { margin: 0; font-size: 23px; letter-spacing: -.02em; font-weight: 700; }
+.muted { color: var(--muted); margin: 4px 0 0; }
+.card { background: color-mix(in srgb, var(--bg-2) 85%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 4px 16px; }
+.opt { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; cursor: pointer; }
+.opt + .opt { border-top: 1px solid var(--line); }
+.opt input { margin: 3px 0 0; width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
+.opt b { display: block; font-weight: 600; }
+.opt small { display: block; color: var(--muted); font-size: 12.5px; }
+.opt small.path { margin-top: 4px; font-family: Consolas, ui-monospace, monospace; font-size: 11.5px; opacity: .8; word-break: break-all; }
+.opt.loc { cursor: default; align-items: center; }
+.opt.loc > span { flex: 1; min-width: 0; }
+.opt.loc small { font-family: Consolas, ui-monospace, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fine { color: var(--muted); font-size: 12px; margin: 12px 2px 0; }
+code { font-family: Consolas, ui-monospace, monospace; font-size: 11.5px; }
+.actions { margin-top: auto; display: flex; justify-content: flex-end; gap: 10px; padding-top: 18px; }
+button { font: inherit; cursor: pointer; border-radius: 10px; padding: 9px 20px; border: 1px solid var(--line); background: var(--bg-2); color: var(--text);
+  transition: transform var(--dur-1) ease, border-color var(--dur-1) ease, filter var(--dur-1) ease; }
+button:hover { border-color: var(--muted); }
+button:active { transform: scale(.97); }
+button.primary { background: var(--grad-accent); border-color: transparent; color: var(--accent-ink); font-weight: 600; padding: 9px 24px; }
+button.primary:hover { filter: brightness(1.08); }
+button.danger { background: var(--danger); border-color: transparent; color: #fff; font-weight: 600; padding: 9px 24px; }
+button.ghost { background: none; }
+.center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.progress { width: 380px; max-width: 100%; height: 8px; border-radius: 8px; background: var(--bg-3); overflow: hidden; margin-top: 22px; }
+.progress i { display: block; height: 100%; width: 0; background: var(--grad-accent); border-radius: 8px; transition: width .25s ease; }
+.pct { color: var(--muted); font-size: 12px; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.tick { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 18px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); animation: pop var(--dur-3) var(--ease-spring); }
+.tick svg { width: 30px; height: 30px; fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.tick.bad { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+.tick.bad svg { stroke: var(--danger); }
+@keyframes pop { from { transform: scale(.6); opacity: 0; } }

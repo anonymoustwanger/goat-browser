@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' goat://static; style-src goat://static; img-src goat://static">
+  <title>New tab</title>
+  <script src="goat://static/theme.js"></script>
+  <link rel="stylesheet" href="goat://static/themes.css">
+  <link rel="stylesheet" href="goat://static/shared.css">
+</head>
+<body>
+  <main>
+    <h1 class="mark">goatr</h1>
+    <p class="privnote" id="privnote" hidden><b>Private tab.</b> Cookies, site data and history from private tabs are kept in memory only and deleted when you close the last private tab. Extensions are off. Your internet provider and websites can still see your IP address.</p>
+    <form class="search" id="search">
+      <input id="q" placeholder="Search or enter address" autocomplete="off" spellcheck="false" aria-label="Search">
+    </form>
+    <section class="speed" id="speed" aria-label="Bookmarks">
+      <div class="tiles" id="tiles"></div>
+      <form class="addbox" id="addbox" hidden autocomplete="off">
+        <div class="folderhead"><b>Add bookmark</b><button type="button" id="addclose" aria-label="Cancel">×</button></div>
+        <div class="addfields">
+          <label>Name <input id="addtitle" maxlength="120" placeholder="Optional" spellcheck="false"></label>
+          <label>Address <input id="addurl" placeholder="youtube.com" spellcheck="false" required></label>
+          <button type="submit" class="addgo">Add</button>
+        </div>
+        <p class="adderr" id="adderr" role="alert" hidden></p>
+      </form>
+      <div class="folderbox" id="folderbox" hidden>
+        <div class="folderhead"><b id="foldername"></b><button id="folderclose" aria-label="Close folder">×</button></div>
+        <div class="tiles small" id="foldertiles"></div>
+      </div>
+    </section>
+    <ul class="facts">
+      <li><b>Ads & trackers blocked.</b> Network and cosmetic blocking. Click the shield to pause it on a site.</li>
+      <li><b>Third-party cookies cut.</b> Sites keep your logins; trackers can't follow you between them.</li>
+      <li><b>Encrypted DNS + HTTPS-only.</b> DNS lookups are encrypted and plain-http links are upgraded.</li>
+      <li><b>Your rules.</b> Cookies, blocker, proxy and more in <a href="goat://settings/">Settings</a>.</li>
+    </ul>
+  </main>
+  <script src="newtab.js"></script>
+</body>
+</html>

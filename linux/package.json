@@ -1,0 +1,25 @@
+{
+  "name": "goatr",
+  "version": "1.0.0",
+  "description": "Goatr: private, fast browser (Linux edition, built on Electron)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "build": "esbuild src/ui/preload.js --bundle --platform=node --format=cjs --external:electron --outfile=src/ui/preload.bundle.js",
+    "package:linux": "npm run build && electron-packager . Goatr --platform=linux --arch=x64 --out=dist --overwrite --asar --ignore=^/dist --ignore=^/build --ignore=^/installer --executable-name=goatr",
+    "appimage": "npm run package:linux && sh installer/linux/build-appimage.sh",
+    "tar": "npm run package:linux && sh installer/linux/build-tar.sh"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.2.3",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.20.3",
+    "openpgp": "^6.3.2",
+    "tldts": "^7.4.19"
+  },
+  "productName": "Goatr"
+}

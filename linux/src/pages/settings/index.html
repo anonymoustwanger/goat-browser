@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' goat://static; style-src goat://static; img-src data:">
+  <title>Settings</title>
+  <script src="goat://static/theme.js"></script>
+  <link rel="stylesheet" href="goat://static/themes.css">
+  <link rel="stylesheet" href="goat://static/shared.css">
+  <link rel="stylesheet" href="goat://static/settings.css">
+</head>
+<body class="settings">
+  <nav class="side">
+    <div class="brand">goatr<span>.</span> settings</div>
+    <a href="#general">General</a>
+    <a href="#profiles">Profiles</a>
+    <a href="#languages">Languages</a>
+    <a href="#appearance">Appearance</a>
+    <a href="#privacy">Privacy</a>
+    <a href="#adblock">Ad blocker</a>
+    <a href="#cookies">Cookies</a>
+    <a href="#tor">Tor</a>
+    <a href="#proxy">Proxy</a>
+    <a href="#data">Clear data</a>
+    <a href="#about">About</a>
+  </nav>
+
+  <div class="content">
+    <p class="winnote" id="winnote" hidden></p>
+    <section id="general">
+      <h2>General</h2>
+      <div class="card">
+        <label class="row"><span><b>Search engine</b><small>Used by the address bar and new tab page.</small></span>
+          <select data-key="searchEngine">
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="brave">Brave Search</option>
+            <option value="startpage">Startpage</option>
+            <option value="google">Google</option>
+            <option value="bing">Bing</option>
+          </select>
+        </label>
+        <label class="row"><span><b>Reopen tabs on startup</b><small>Restores your tabs and tab groups.</small></span>
+          <input type="checkbox" class="toggle" data-key="restoreTabs">
+        </label>
+        <label class="row"><span><b>HTTPS-only mode</b><small>Upgrades http:// to https://. You can still opt in per site.</small></span>
+          <input type="checkbox" class="toggle" data-key="httpsOnly">
+        </label>
+        <div class="row col" id="dnsrow">
+          <label class="dnshead"><span><b>Encrypted DNS</b><small>Site lookups are sent encrypted (DNS over HTTPS), so your internet provider can't see or change them.</small></span>
+            <select data-key="dns.provider" id="dnsprovider">
+              <option value="quad9">Quad9 (recommended)</option>
+              <option value="mullvad">Mullvad</option>
+              <option value="mullvadAdblock">Mullvad, blocks ads</option>
+              <option value="cloudflare">Cloudflare</option>
+              <option value="google">Google</option>
+              <option value="adguard">AdGuard, blocks ads</option>
+              <option value="nextdns">NextDNS</option>
+              <option value="custom">Custom…</option>
+              <option value="off">Off (use OS DNS)</option>
+            </select>
+          </label>
+          <div class="grid" id="dnsnext" hidden>
+            <label class="wide">NextDNS configuration ID <input data-key="dns.nextdnsId" placeholder="abc123" spellcheck="false"></label>
+          </div>
+          <div class="grid" id="dnscustom" hidden>
+            <label class="wide">DNS-over-HTTPS address <input data-key="dns.custom" placeholder="https://dns.example.com/dns-query" spellcheck="false"></label>
+          </div>
+          <div class="dnsstatus"><span id="dnsstate" class="muted">Checking…</span>
+            <span class="dnsbtns"><button type="button" id="dnstest">Test again</button><button type="button" id="dnscheck" hidden>Open check page</button></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="profiles">
+      <h2>Profiles</h2>
+      <div class="card">
+        <p class="hint">Each profile has its own cookies, logins, history, bookmarks and settings, kept only on this computer. Use one for work and one for personal, for example. Each opens in its own window.</p>
+        <div id="profilelist" class="profilelist"></div>
+        <form class="inline" id="profileform">
+          <input id="profilename" placeholder="New profile name, e.g. Work" maxlength="40" spellcheck="false">
+          <button class="primary">Add profile</button>
+        </form>
+        <p class="saved" id="profilemsg"></p>
+      </div>
+    </section>
+
+    <section id="languages">
+      <h2>Languages</h2>
+      <div class="card">
+        <label class="row"><span><b>Website language</b><small>The language sites are asked to show. Helps a lot over Tor, where sites otherwise guess from the Tor exit's country. <em class="restart" data-restart="languages.sites" hidden>Restart Goatr to apply everywhere.</em></small></span>
+          <select data-key="languages.sites" class="langselect"></select>
+        </label>
+        <label class="row"><span><b>Translate pages into</b><small>Click the translate button in the address bar, or right-click a page → Translate.</small></span>
+          <select data-key="languages.translateTo" class="langselect"></select>
+        </label>
+        <label class="row"><span><b>Offer to translate</b><small>Shows the translate button when a page is in another language.</small></span>
+          <input type="checkbox" class="toggle" data-key="languages.offer">
+        </label>
+        <label class="row"><span><b>Always translate</b><small>Pages in other languages are translated as soon as they load.</small></span>
+          <input type="checkbox" class="toggle" data-key="languages.auto">
+        </label>
+        <div class="row col">
+          <span><b>Translation service</b><small>The page's text is sent to this service to be translated. Private and Tor windows send it through Tor or their own session.</small></span>
+          <div class="radios">
+            <label><input type="radio" name="tre" value="libre" data-key="languages.engine"> <span><b>LibreTranslate</b><small>Open source, so Google sees nothing. libretranslate.com needs an API key (get one at portal.libretranslate.com); or use your own server or another public one.</small></span></label>
+            <label><input type="radio" name="tre" value="google" data-key="languages.engine"> <span><b>Google Translate</b><small>Free, no key. Google sees the text you translate (not your cookies).</small></span></label>
+          </div>
+          <div class="grid" id="librefields" hidden>
+            <label class="wide">LibreTranslate address <input data-key="languages.libreUrl" placeholder="https://libretranslate.com" spellcheck="false"></label>
+            <label class="wide">API key <input data-key="languages.libreKey" placeholder="optional" spellcheck="false" autocomplete="off"></label>
+          </div>
+        </div>
+        <p class="hint">Goatr's own menus are in English.</p>
+      </div>
+    </section>
+
+    <section id="appearance">
+      <h2>Appearance</h2>
+      <div class="card">
+        <div class="row col">
+          <span><b>Theme</b><small>Applies to the toolbar, Goatr's own pages, and tells websites to use dark or light mode.</small></span>
+          <div class="themes" id="themes" role="radiogroup" aria-label="Theme"></div>
+        </div>
+        <div class="row col" id="editor" hidden>
+          <span><b id="editortitle">New theme</b><small>Pick five colors. The rest are worked out for you.</small></span>
+          <div class="editor">
+            <div class="fields">
+              <label class="wide">Name <input id="ed-name" maxlength="30" placeholder="My theme" spellcheck="false"></label>
+              <label class="wide">Start from
+                <select id="ed-base"></select>
+              </label>
+              <label class="color">Background <input type="color" id="ed-bg"></label>
+              <label class="color">Surface <input type="color" id="ed-surface"></label>
+              <label class="color">Text <input type="color" id="ed-text"></label>
+              <label class="color">Accent <input type="color" id="ed-accent"></label>
+              <label class="color">Accent 2 <input type="color" id="ed-accent2"></label>
+              <p class="warnmsg" id="ed-warn" hidden></p>
+            </div>
+            <div class="preview" id="ed-preview" aria-label="Preview">
+              <div class="pv-strip"><i class="on"></i><i></i><i></i></div>
+              <div class="pv-nav"><b></b><u></u></div>
+              <div class="pv-page">
+                <div class="pv-title">Aa</div>
+                <div class="pv-text"></div><div class="pv-text short"></div>
+                <div class="pv-btn">Button</div>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="ed-save">Save and use</button>
+            <button id="ed-cancel">Cancel</button>
+            <button class="danger" id="ed-delete" hidden>Delete theme</button>
+          </div>
+        </div>
+        <label class="row"><span><b>Gradients</b><small>Soft color gradients on the toolbar, pages and buttons.</small></span>
+          <input type="checkbox" class="toggle" data-key="appearance.gradients">
+        </label>
+        <div class="row col">
+          <span><b>Animations</b><small>Tab, folder and page motion.</small></span>
+          <div class="radios">
+            <label><input type="radio" name="motion" value="system" data-key="appearance.motion"> <span><b>Follow system</b><small>On, unless your system has "Animation effects" turned off.</small></span></label>
+            <label><input type="radio" name="motion" value="on" data-key="appearance.motion"> <span><b>On</b></span></label>
+            <label><input type="radio" name="motion" value="off" data-key="appearance.motion"> <span><b>Off</b><small>Everything changes instantly.</small></span></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <h2>Privacy</h2>
+      <div class="card">
+        <div class="row col">
+          <span><b>Profile</b><small>Sets the speed-vs-privacy switches in one click: preloading, keeping sites separate, font blocking, fingerprint protection, ad blocking level and DNS. You can still change any of them below. <em class="restart" id="profrestart" hidden>Restart Goatr to apply fully.</em></small></span>
+          <div class="profiles" id="privprofiles" role="radiogroup" aria-label="Settings profile"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row col">
+          <span><b>Fingerprint protection</b><small>Stops sites from identifying your device by its hardware, GPU and browser details.</small></span>
+          <div class="radios">
+            <label><input type="radio" name="fp" value="off" data-key="privacy.fingerprint"> <span><b>Off</b></span></label>
+            <label><input type="radio" name="fp" value="standard" data-key="privacy.fingerprint"> <span><b>Standard</b><small>Reports common hardware and GPU values, hides exact OS and CPU details. Recommended.</small></span></label>
+            <label><input type="radio" name="fp" value="strict" data-key="privacy.fingerprint"> <span><b>Strict</b><small>Also adds tiny per-site noise to canvas and audio readouts. Rarely, image editors or games may misbehave.</small></span></label>
+          </div>
+        </div>
+        <div class="row col">
+          <span><b>Passkeys and security keys</b><small>Some sites start a passkey sign-in on their own, which makes your system pop up "use your security key".</small></span>
+          <div class="radios">
+            <label><input type="radio" name="wa" value="ask" data-key="privacy.webauthn"> <span><b>Ask first</b><small>Goatr asks before a site can open the system passkey dialog, and stops sites from opening it by themselves. Recommended.</small></span></label>
+            <label><input type="radio" name="wa" value="allow" data-key="privacy.webauthn"> <span><b>Allow</b><small>Sites use passkeys and security keys like in Chrome.</small></span></label>
+            <label><input type="radio" name="wa" value="block" data-key="privacy.webauthn"> <span><b>Block</b><small>Never use passkeys or security keys. Sites fall back to passwords or codes.</small></span></label>
+          </div>
+        </div>
+        <label class="row"><span><b>History</b><small>Pages you visit in normal tabs. Private tabs are never saved. <a href="goat://history/" class="inlink">Open history</a></small></span>
+          <select data-key="history.keepDays" data-number="1">
+            <option value="0">Don't save history</option>
+            <option value="7">Keep for 7 days</option>
+            <option value="30">Keep for 30 days</option>
+            <option value="90">Keep for 90 days</option>
+            <option value="365">Keep for 1 year</option>
+            <option value="-1">Keep forever</option>
+          </select>
+        </label>
+        <label class="row"><span><b>Remove tracking from links</b><small>Strips tags like utm_source, fbclid and gclid from addresses you open.</small></span>
+          <input type="checkbox" class="toggle" data-key="privacy.stripTracking">
+        </label>
+        <label class="row"><span><b>Keep sites separate</b><small>Each site gets its own storage, cache and connections, so embedded trackers can't recognize you across sites. <em class="restart" data-restart="privacy.isolateSites" hidden>Restart Goatr to apply.</em></small></span>
+          <input type="checkbox" class="toggle" data-key="privacy.isolateSites">
+        </label>
+        <label class="row"><span><b>Trim referrers</b><small>When you open another site, it isn't told which page you came from. Things loaded from other servers only see the site name, not the page.</small></span>
+          <input type="checkbox" class="toggle" data-key="privacy.trimReferrers">
+        </label>
+        <label class="row"><span><b>No background preloading</b><small>Sites can't load pages you haven't clicked yet, and Goatr doesn't open early connections. Pages may open a little slower. <em class="restart" data-restart="privacy.blockPrefetch" hidden>Restart Goatr to apply fully.</em></small></span>
+          <input type="checkbox" class="toggle" data-key="privacy.blockPrefetch">
+        </label>
+        <label class="row"><span><b>Block fonts from other sites</b><small>Stops font services (like Google Fonts) from seeing which sites you visit. Some icons may show as boxes; pause the ad blocker on a site to allow them there.</small></span>
+          <input type="checkbox" class="toggle" data-key="privacy.blockThirdPartyFonts">
+        </label>
+      </div>
+
+      <h3>Forget when closed</h3>
+      <div class="card">
+        <p class="hint">When the last tab of one of these sites closes, its cookies and saved data are deleted. You can also right-click a tab → "Forget … when closed".</p>
+        <form class="inline" id="forgetform">
+          <input id="forgetinput" placeholder="example.com" spellcheck="false">
+          <button>Add</button>
+        </form>
+        <ul class="chips" id="forgetlist"></ul>
+      </div>
+      <h3>Performance</h3>
+      <div class="card">
+        <label class="row"><span><b>Memory saver</b><small>Background tabs you haven't used for a while sleep to free memory. They wake when you open them.</small></span>
+          <select data-key="performance.sleepAfterMin" data-number="1">
+            <option value="0">Off</option>
+            <option value="5">After 5 minutes</option>
+            <option value="15">After 15 minutes</option>
+            <option value="30">After 30 minutes</option>
+            <option value="60">After 1 hour</option>
+            <option value="120">After 2 hours</option>
+          </select>
+        </label>
+        <div class="row col">
+          <span><b>Memory use</b><small id="memtotal">Measuring…</small></span>
+          <div class="tablewrap tasks"><table>
+            <thead><tr><th>Tab</th><th class="num">Memory</th><th></th></tr></thead>
+            <tbody id="tasklist"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="adblock">
+      <h2>Ad blocker</h2>
+      <div class="card">
+        <label class="row"><span><b>Block ads and trackers</b><small id="abstatus">Loading…</small></span>
+          <input type="checkbox" class="toggle" data-key="adblock.enabled">
+        </label>
+        <div class="row col">
+          <span><b>Blocking level</b></span>
+          <div class="radios">
+            <label><input type="radio" name="level" value="ads" data-key="adblock.level"> <span><b>Ads only</b><small>Lightest. Ads blocked, trackers allowed.</small></span></label>
+            <label><input type="radio" name="level" value="standard" data-key="adblock.level"> <span><b>Standard</b><small>Ads and trackers. Recommended.</small></span></label>
+            <label><input type="radio" name="level" value="strict" data-key="adblock.level"> <span><b>Strict</b><small>Also cookie banners, popups and other annoyances. May break some sites.</small></span></label>
+          </div>
+        </div>
+        <div class="row">
+          <span><b>Update blocklists</b><small>Lists refresh weekly on their own.</small></span>
+          <button id="abrefresh">Update now</button>
+        </div>
+      </div>
+
+      <h3>Allowed sites</h3>
+      <div class="card">
+        <p class="hint">The ad blocker is paused on these sites. You can also click the shield in the toolbar.</p>
+        <form class="inline" id="allowform">
+          <input id="allowinput" placeholder="example.com" spellcheck="false">
+          <button>Add</button>
+        </form>
+        <ul class="chips" id="allowlist"></ul>
+      </div>
+
+      <h3>Custom filters</h3>
+      <div class="card">
+        <p class="hint">One rule per line, Adblock Plus / uBlock syntax. Examples: <code>||ads.example.com^</code> blocks a domain, <code>example.com##.banner</code> hides an element, <code>@@||site.com^</code> allows it. Lines starting with <code>!</code> are comments.</p>
+        <textarea id="rules" rows="7" spellcheck="false"></textarea>
+        <div class="actions"><button class="primary" id="rulesave">Save filters</button><span class="saved" id="rulesaved"></span></div>
+      </div>
+    </section>
+
+    <section id="cookies">
+      <h2>Cookies</h2>
+      <div class="card">
+        <label class="row"><span><b>Block third-party cookies</b><small>Stops trackers that follow you across sites. Some embedded logins may need this off.</small></span>
+          <input type="checkbox" class="toggle" data-key="cookies.blockThirdParty">
+        </label>
+        <label class="row"><span><b>Delete cookies when Goatr closes</b><small>Signs you out of sites on every exit.</small></span>
+          <input type="checkbox" class="toggle" data-key="cookies.clearOnExit">
+        </label>
+      </div>
+
+      <h3>Cookie manager</h3>
+      <div class="card">
+        <div class="toolbar">
+          <input id="cookiesearch" placeholder="Search sites or cookie names" spellcheck="false">
+          <span class="muted" id="cookiecount"></span>
+          <button id="cookiereload">Refresh</button>
+          <button class="danger" id="cookieclear">Delete all</button>
+        </div>
+        <div id="cookielist" class="cookielist"></div>
+      </div>
+    </section>
+
+    <section id="tor">
+      <h2>Tor</h2>
+      <div class="card">
+        <label class="row"><span><b>Route everything through Tor</b><small>Hides your IP address: sites see a Tor address instead. No Tor Browser needed. The first time, Goatr downloads Tor (about 15&nbsp;MB) from torproject.org and checks its signature. Pages are slower, and some sites block Tor or show more captchas. While Tor is connecting or broken, pages don't load at all, so your real IP never leaks.</small></span>
+          <input type="checkbox" class="toggle" data-key="tor.enabled">
+        </label>
+        <label class="row"><span><b>Tor button in the toolbar</b><small>A button to turn Tor on and off with one click. It always shows while Tor is on.</small></span>
+          <input type="checkbox" class="toggle" data-key="tor.showButton">
+        </label>
+        <div class="row">
+          <span><b>Status</b><small id="torstate" class="muted">Off</small></span>
+          <span class="dnsbtns"><button type="button" id="tornew" disabled>New circuit</button><button type="button" id="torcheck" disabled>Check</button></span>
+        </div>
+        <p class="hint">Tor replaces the proxy below while it's on. "New circuit" gives new connections a different Tor IP. Tor hides your IP, but it isn't Tor Browser: logging in to sites still identifies you.</p>
+      </div>
+    </section>
+
+    <section id="proxy">
+      <h2>Proxy</h2>
+      <div class="card">
+        <div class="row col">
+          <div class="radios">
+            <label><input type="radio" name="pmode" value="system" data-proxy="mode"> <span><b>Use system proxy</b><small>Follows your system proxy settings.</small></span></label>
+            <label><input type="radio" name="pmode" value="direct" data-proxy="mode"> <span><b>No proxy</b><small>Connect directly.</small></span></label>
+            <label><input type="radio" name="pmode" value="manual" data-proxy="mode"> <span><b>Manual</b><small>HTTP, HTTPS, SOCKS4 or SOCKS5 server.</small></span></label>
+            <label><input type="radio" name="pmode" value="pac" data-proxy="mode"> <span><b>Auto-config (PAC) URL</b></span></label>
+          </div>
+        </div>
+        <div class="grid" id="manualfields">
+          <label>Type
+            <select data-proxy="type">
+              <option value="socks5">SOCKS5</option>
+              <option value="socks4">SOCKS4</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+          </label>
+          <label>Host <input data-proxy="host" placeholder="127.0.0.1" spellcheck="false"></label>
+          <label>Port <input data-proxy="port" placeholder="1080" inputmode="numeric"></label>
+          <label>Username <input data-proxy="username" placeholder="optional" spellcheck="false" autocomplete="off"></label>
+          <label>Password <input data-proxy="password" type="password" placeholder="optional" autocomplete="new-password"></label>
+          <label class="wide">Bypass list <input data-proxy="bypass" placeholder="<local>, *.example.com" spellcheck="false"></label>
+        </div>
+        <div class="grid" id="pacfields">
+          <label class="wide">PAC URL <input data-proxy="pacUrl" placeholder="http://wpad/wpad.dat" spellcheck="false"></label>
+        </div>
+        <p class="hint">SOCKS5 sends DNS through the proxy. Chromium doesn't support SOCKS5 passwords: use an HTTP(S) proxy for login-protected servers.</p>
+        <div class="actions"><button class="primary" id="proxysave">Apply proxy</button><span class="saved" id="proxysaved"></span></div>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2>Clear data</h2>
+      <div class="card">
+        <div class="row">
+          <span><b>Clear all browsing data</b><small>Deletes history, cookies, cache, site storage, and closes all tabs. Settings and bookmarks are kept.</small></span>
+          <button class="danger" id="cleardata">Clear everything</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="about">
+      <h2>About</h2>
+      <div class="card"><p class="hint" id="about-text"></p>
+        <div class="row">
+          <span><b>Updates</b><small id="updstate" class="muted">Checking…</small></span>
+          <span class="dnsbtns"><button type="button" id="updcheck">Check now</button><button type="button" class="primary" id="updinstall" hidden>Update</button></span>
+        </div>
+        <div class="progressbar" id="updbar" hidden><i id="updfill"></i></div>
+        <label class="row"><span><b>Check for updates automatically</b><small>Once a day, Goatr asks GitHub whether a newer version exists. Nothing about you is sent.</small></span>
+          <input type="checkbox" class="toggle" data-key="updates.auto">
+        </label>
+        <div class="row" id="uninstallrow" hidden>
+          <span><b>Uninstall Goatr</b><small>Removes Goatr from this computer. You can keep your profile (cookies, bookmarks, settings) for later.</small></span>
+          <button class="danger" id="uninstall">Uninstall…</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

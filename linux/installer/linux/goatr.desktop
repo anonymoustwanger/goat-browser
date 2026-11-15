@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Goatr
+GenericName=Web Browser
+Comment=A private, fast browser built on Chromium
+Exec=goatr %U
+Icon=goatr
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=Goatr
+Actions=new-private-window;new-tor-window;
+
+[Desktop Action new-private-window]
+Name=New private window
+Exec=goatr --goat-window=private
+
+[Desktop Action new-tor-window]
+Name=New Tor window
+Exec=goatr --goat-window=tor
