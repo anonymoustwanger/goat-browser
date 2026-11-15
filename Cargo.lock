@@ -881,8 +881,6 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4e449f4c4a2a60c7ccb4ba7fa4078417bfe1f9ddc03b5e05ce75748e33a70de"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -1523,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "goatr"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "adblock",
  "chrono",
@@ -1541,6 +1539,7 @@ dependencies = [
  "urlencoding",
  "webview2-com",
  "windows",
+ "windows-core",
  "wry",
  "zip",
 ]

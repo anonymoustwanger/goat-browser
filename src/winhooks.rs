@@ -337,3 +337,209 @@ pub fn scheme_app_name(scheme: &str) -> Option<String> {
     let name = name.trim_start_matches("URL:").trim_start_matches("URL ").trim().trim_end_matches(" Protocol").trim().to_string();
     Some(if name.is_empty() || name.starts_with('@') { scheme.to_string() } else { name })
 }
+
+thread_local! {
+    /// The right-click waiting for Goatr's menu: the engine waits until we answer.
+    static PENDING_MENU: std::cell::RefCell<Option<(ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Deferral)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Replace the engine's right-click menu with Goatr's. `show` gets what was clicked;
+/// answer with `finish_context_menu`.
+pub fn watch_context_menu(webview: &wry::WebView, show: impl Fn(crate::shared::PageMenu) + 'static) {
+    unsafe {
+        let Ok(c11) = webview.webview().cast::<ICoreWebView2_11>() else { return };
+        let handler = webview2_com::ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            finish_context_menu(None); // an older one still open
+            let _ = args.SetHandled(true);
+            let Ok(deferral) = args.GetDeferral() else { return Ok(()) };
+            let mut m = crate::shared::PageMenu::default();
+            if let Ok(t) = args.ContextMenuTarget() {
+                let s = |f: &dyn Fn(*mut PWSTR) -> windows::core::Result<()>| {
+                    let mut p = PWSTR::null();
+                    if f(&mut p).is_ok() { take_pwstr(p) } else { String::new() }
+                };
+                let b = |f: &dyn Fn(*mut windows::core::BOOL) -> windows::core::Result<()>| {
+                    let mut v = windows::core::BOOL(0);
+                    f(&mut v).is_ok() && v.as_bool()
+                };
+                if b(&|v| t.HasLinkUri(v)) {
+                    m.link = s(&|p| t.LinkUri(p));
+                }
+                if b(&|v| t.HasSourceUri(v)) {
+                    m.src = s(&|p| t.SourceUri(p));
+                }
+                if b(&|v| t.HasSelection(v)) {
+                    m.selection = s(&|p| t.SelectionText(p));
+                }
+                m.editable = b(&|v| t.IsEditable(v));
+            }
+            if let Ok(items) = args.MenuItems() {
+                let mut n = 0u32;
+                let _ = items.Count(&mut n);
+                for i in 0..n {
+                    let Ok(it) = items.GetValueAtIndex(i) else { continue };
+                    let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND;
+                    let _ = it.Kind(&mut kind);
+                    if kind != COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND {
+                        continue;
+                    }
+                    let (mut name, mut label) = (PWSTR::null(), PWSTR::null());
+                    let name = if it.Name(&mut name).is_ok() { take_pwstr(name) } else { String::new() };
+                    let label = if it.Label(&mut label).is_ok() { take_pwstr(label) } else { String::new() };
+                    let mut id = 0i32;
+                    let _ = it.CommandId(&mut id);
+                    let mut en = windows::core::BOOL(1);
+                    let _ = it.IsEnabled(&mut en);
+                    m.native.push((name, label.replace('&', ""), id, en.as_bool()));
+                }
+            }
+            PENDING_MENU.with(|p| *p.borrow_mut() = Some((args, deferral)));
+            show(m);
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = c11.add_ContextMenuRequested(&handler, &mut token);
+    }
+}
+
+/// Answer the waiting right-click: run one of the engine's commands, or nothing.
+pub fn finish_context_menu(command: Option<i32>) {
+    let pending = PENDING_MENU.with(|p| p.borrow_mut().take());
+    if let Some((args, deferral)) = pending {
+        unsafe {
+            if let Some(id) = command {
+                let _ = args.SetSelectedCommandId(id);
+            }
+            let _ = deferral.Complete();
+        }
+    }
+}
+
+/// Mouse position on screen, in physical pixels.
+pub fn cursor_pos() -> Option<(f32, f32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p).ok()? };
+    Some((p.x as f32, p.y as f32))
+}
+
+/// Tell us when a tab starts or stops playing sound.
+pub fn watch_audio(webview: &wry::WebView, on_change: impl Fn(bool) + 'static) {
+    unsafe {
+        let Ok(c8) = webview.webview().cast::<ICoreWebView2_8>() else { return };
+        let handler = webview2_com::IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+            if let Some(c8) = sender.and_then(|s| s.cast::<ICoreWebView2_8>().ok()) {
+                let mut v = windows::core::BOOL(0);
+                if c8.IsDocumentPlayingAudio(&mut v).is_ok() {
+                    on_change(v.as_bool());
+                }
+            }
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = c8.add_IsDocumentPlayingAudioChanged(&handler, &mut token);
+    }
+}
+
+/// The web engine's main process for this webview (its sound comes from it and its children).
+pub fn browser_pid(webview: &wry::WebView) -> Option<u32> {
+    let mut pid = 0u32;
+    unsafe { webview.webview().BrowserProcessId(&mut pid).ok()? };
+    (pid != 0).then_some(pid)
+}
+
+/// Refresh rate (Hz) of the monitor `hwnd` is on.
+pub fn monitor_refresh(hwnd: isize) -> Option<u32> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromWindow, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST};
+    unsafe {
+        let mon = MonitorFromWindow(HWND(hwnd as _), MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if !GetMonitorInfoW(mon, &mut info as *mut _ as *mut _).as_bool() {
+            return None;
+        }
+        let mut dm = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
+        if !EnumDisplaySettingsW(windows::core::PCWSTR(info.szDevice.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm).as_bool() {
+            return None;
+        }
+        (dm.dmDisplayFrequency > 1).then_some(dm.dmDisplayFrequency)
+    }
+}
+
+/// Goatr's own "can't reach this page" instead of the engine's Edge-branded one.
+/// A failed load opens `goat://neterror?u=…&e=…`; going back past it skips the dead entry.
+pub fn watch_load_errors(webview: &wry::WebView) {
+    use std::{cell::RefCell, rc::Rc};
+    unsafe {
+        let wv = webview.webview();
+        if let Ok(s) = wv.Settings() {
+            let _ = s.SetIsBuiltInErrorPageEnabled(false);
+        }
+        // (navigation id that was back/forward, last url that failed)
+        let state: Rc<RefCell<(u64, String)>> = Rc::new(RefCell::new((u64::MAX, String::new())));
+        {
+            let state = state.clone();
+            let h = webview2_com::NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                if let Ok(a3) = args.cast::<ICoreWebView2NavigationStartingEventArgs3>() {
+                    let mut kind = COREWEBVIEW2_NAVIGATION_KIND::default();
+                    let mut id = 0u64;
+                    if a3.NavigationKind(&mut kind).is_ok() && args.NavigationId(&mut id).is_ok() {
+                        let mut st = state.borrow_mut();
+                        st.0 = if kind == COREWEBVIEW2_NAVIGATION_KIND_BACK_OR_FORWARD { id } else { u64::MAX };
+                    }
+                }
+                Ok(())
+            }));
+            let mut token = Default::default();
+            let _ = wv.add_NavigationStarting(&h, &mut token);
+        }
+        let h = webview2_com::NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+            let (Some(wv), Some(args)) = (sender, args) else { return Ok(()) };
+            let mut ok = windows::core::BOOL::default();
+            let _ = args.IsSuccess(&mut ok);
+            if ok.as_bool() {
+                return Ok(());
+            }
+            let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+            let _ = args.WebErrorStatus(&mut status);
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                return Ok(());
+            }
+            // The site answered (404, 500…): its own page shows.
+            if let Ok(a2) = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>() {
+                let mut code = 0i32;
+                if a2.HttpStatusCode(&mut code).is_ok() && code != 0 {
+                    return Ok(());
+                }
+            }
+            let mut p = PWSTR::null();
+            let url = if wv.Source(&mut p).is_ok() { take_pwstr(p) } else { String::new() };
+            if url.is_empty() || url.starts_with(crate::INTERNAL_BASE) || url.starts_with("about:") || url.starts_with("data:") {
+                return Ok(());
+            }
+            let mut id = 0u64;
+            let _ = args.NavigationId(&mut id);
+            let back_into_dead = {
+                let st = state.borrow();
+                st.0 == id && st.1 == url
+            };
+            if back_into_dead {
+                let mut can = windows::core::BOOL::default();
+                if wv.CanGoBack(&mut can).is_ok() && can.as_bool() {
+                    let _ = wv.GoBack();
+                    return Ok(());
+                }
+            }
+            state.borrow_mut().1 = url.clone();
+            let target = format!("{}/neterror?e={}&u={}", crate::INTERNAL_BASE, status.0, urlencoding::encode(&url));
+            let _ = wv.Navigate(&HSTRING::from(target));
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = wv.add_NavigationCompleted(&h, &mut token);
+    }
+}

@@ -70,6 +70,12 @@ pub fn install_fonts(ctx: &egui::Context) -> bool {
         prop.push("segoe-sym".into());
         semi.push("segoe-sym".into());
     }
+    // Every emoji (profile logos); egui's own emoji font only has some of them.
+    if let Ok(b) = std::fs::read(dir.join("seguiemj.ttf")) {
+        fonts.font_data.insert("segoe-emoji".into(), Arc::new(FontData::from_owned(b)));
+        prop.push("segoe-emoji".into());
+        semi.push("segoe-emoji".into());
+    }
     fonts.families.insert(FontFamily::Proportional, prop);
     fonts.families.insert(semibold(), semi);
     ctx.set_fonts(fonts);
@@ -122,22 +128,118 @@ pub fn icon_button(ui: &mut Ui, rect: Rect, id: Id, icon: Icon, pal: &Palette, e
     if hover > 0.0 {
         p.rect_filled(rect, 8, alpha(pal.bg3, hover));
     }
-    let shrink = if resp.is_pointer_button_down_on() { 0.9 } else { 1.0 };
-    let ir = Rect::from_center_size(rect.center(), Vec2::splat(16.0 * shrink));
+    let shrink = crate::anim::tween(ui.ctx(), id.with("press"), if resp.is_pointer_button_down_on() { 0.82 } else { 1.0 }, 0.3, crate::anim::spring);
+    // Hover: the icon grows a little with a bounce.
+    let grow = crate::anim::tween(ui.ctx(), id.with("grow"), if enabled && resp.hovered() { 1.22 } else { 1.0 }, 0.32, crate::anim::ease_bounce);
+    let ir = Rect::from_center_size(rect.center(), Vec2::splat(16.0 * shrink * grow));
     let color = if enabled { pal.text } else { alpha(pal.muted, 0.45) };
-    icons::draw(p, ir, icon, color, width);
+    // Goat's extensions button tilts when hovered.
+    let tilt = if id == Id::new("extbtn") { crate::anim::tween(ui.ctx(), id.with("tilt"), if resp.hovered() { -0.14 } else { 0.0 }, 0.32, crate::anim::ease_bounce) } else { 0.0 };
+    if tilt.abs() > 0.001 {
+        icons::draw_rot(p, ir, icon, color, width, tilt);
+    } else {
+        icons::draw(p, ir, icon, color, width);
+    }
     resp
 }
 
 impl App {
+    /// Start-up "Who's browsing?" screen. Returns the chosen profile ("" = Default).
+    pub fn draw_profile_picker(&mut self, ui: &mut Ui) -> Option<String> {
+        let ctx = ui.ctx().clone();
+        let pal = self.palette();
+        self.clear = [0.0, 0.0, 0.0, 0.0];
+        let full = ui.max_rect();
+        let p = ui.painter().clone();
+        p.rect_filled(full, 0, pal.bg);
+        // Drag the window by its top; close button top-right.
+        let bar = Rect::from_min_size(full.min, vec2(full.width() - 46.0, 40.0));
+        if ui.interact(bar, Id::new("picker-drag"), Sense::click_and_drag()).drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        let xr = Rect::from_min_size(pos2(full.right() - 46.0, full.top()), vec2(46.0, 36.0));
+        let xresp = ui.interact(xr, Id::new("picker-close"), Sense::click());
+        if xresp.hovered() {
+            p.rect_filled(xr, 0, Color32::from_rgb(0xc4, 0x2b, 0x1c));
+        }
+        let c = xr.center();
+        p.line_segment([c + vec2(-5.0, -5.0), c + vec2(5.0, 5.0)], Stroke::new(1.2, pal.text));
+        p.line_segment([c + vec2(5.0, -5.0), c + vec2(-5.0, 5.0)], Stroke::new(1.2, pal.text));
+        if xresp.clicked() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        let profiles = crate::store::profiles();
+        let tile = vec2(132.0, 150.0);
+        let gap = 18.0;
+        let per_row = (((full.width() - 80.0) / (tile.x + gap)).floor() as usize).clamp(1, 6);
+        let rows = profiles.len().div_ceil(per_row);
+        let block_h = 70.0 + rows as f32 * (tile.y + gap) + 50.0;
+        let top = (full.center().y - block_h / 2.0).max(full.top() + 50.0);
+        p.text(pos2(full.center().x, top), Align2::CENTER_TOP, "Who's browsing?", bold(26.0), pal.text);
+        p.text(pos2(full.center().x, top + 38.0), Align2::CENTER_TOP, "Pick a profile. Each has its own cookies, history and extensions.", font(13.5), pal.muted);
+        let mut chosen = None;
+        for (i, prof) in profiles.iter().enumerate() {
+            let row = i / per_row;
+            let in_row = if row + 1 == rows { profiles.len() - row * per_row } else { per_row };
+            let row_w = in_row as f32 * tile.x + (in_row as f32 - 1.0) * gap;
+            let x = full.center().x - row_w / 2.0 + (i % per_row) as f32 * (tile.x + gap);
+            let y = top + 80.0 + row as f32 * (tile.y + gap);
+            let r = Rect::from_min_size(pos2(x, y), tile);
+            let resp = ui.interact(r, Id::new(("picker-tile", i)), Sense::click());
+            // Bouncy grow on hover.
+            let grow = anim::tween(&ctx, Id::new(("picker-grow", i)), if resp.hovered() { 1.08 } else { 1.0 }, 0.32, anim::ease_bounce);
+            let h = anim::hover(&ctx, Id::new(("picker-h", i)), resp.hovered(), 0.15);
+            let rr = Rect::from_center_size(r.center(), r.size() * grow);
+            p.rect_filled(rr, 18, mix(pal.bg2, pal.bg3, h));
+            p.rect_stroke(rr, 18, Stroke::new(1.0, mix(pal.line, pal.accent, h * 0.6)), egui::StrokeKind::Inside);
+            let (glyph, color) = crate::store::profile_logo(prof);
+            let color = Color32::from_hex(&color).unwrap_or(pal.accent);
+            let lc = pos2(rr.center().x, rr.top() + 58.0 * grow);
+            p.circle_filled(lc, 34.0 * grow, color);
+            p.text(lc + vec2(0.0, 1.0), Align2::CENTER_CENTER, &glyph, bold((28.0 * grow).round()), Color32::from_rgb(0x10, 0x12, 0x14));
+            let name = if prof.is_empty() { "Default" } else { prof.as_str() };
+            text_elided(&p, pos2(rr.center().x, rr.bottom() - 26.0 * grow), name, bold(((14.0 * grow) * 2.0).round() / 2.0), pal.text, rr.width() - 16.0, Align2::CENTER_CENTER);
+            if resp.hovered() {
+                ctx.set_cursor_icon(CursorIcon::PointingHand);
+            }
+            if resp.clicked() {
+                chosen = Some(prof.clone());
+            }
+        }
+        // "Always open this profile".
+        let cy = top + 80.0 + rows as f32 * (tile.y + gap) + 14.0;
+        let label = "Always open the profile I pick when Goatr starts";
+        let w = 18.0 + 10.0 + text_width(ui, label, font(13.0));
+        let row = Rect::from_min_size(pos2(full.center().x - w / 2.0, cy), vec2(w, 22.0));
+        let cr = ui.interact(row, Id::new("picker-always"), Sense::click());
+        if cr.clicked() {
+            self.profile_always = !self.profile_always;
+        }
+        let on = self.profile_always;
+        let b = Rect::from_min_size(pos2(row.left(), row.center().y - 9.0), Vec2::splat(18.0));
+        p.rect_filled(b, 5, if on { pal.accent } else { pal.bg2 });
+        p.rect_stroke(b, 5, Stroke::new(1.0, if on { pal.accent } else { pal.line }), egui::StrokeKind::Inside);
+        if on {
+            icons::draw(&p, b.shrink(3.0), icons::CHECK, pal.ink, 2.0);
+        }
+        p.text(pos2(b.right() + 10.0, row.center().y), Align2::LEFT_CENTER, label, font(13.0), if cr.hovered() { pal.text } else { pal.muted });
+        p.text(pos2(full.center().x, cy + 30.0), Align2::CENTER_TOP, "You can change this later in Settings → Profiles.", font(11.5), alpha(pal.muted, 0.8));
+        chosen
+    }
+
     pub fn draw_chrome(&mut self, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let ctx = ui.ctx().clone();
         let pal = self.palette();
+        // Pop-up windows are see-through, so the clear colour is transparent; Goatr's own
+        // window paints its background here instead.
+        self.clear = [0.0, 0.0, 0.0, 0.0];
         let anim = self.animations();
         anim::set_enabled(&ctx, anim);
         let settings = self.settings();
         self.apply_visuals(&ctx, &pal);
         let full = ui.max_rect();
+        ui.painter().rect_filled(full, 0, pal.bg);
         let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
         let fs = self.fullscreen;
         let chrome_h = if fs { 0.0 } else { STRIP_H + NAV_H + if settings.show_bookmarks_bar { BM_H } else { 0.0 } };
@@ -334,8 +436,8 @@ impl App {
         // The active-tab highlight slides from tab to tab.
         if let Some(t) = self.tabs.get(self.active) {
             let target_x = strip.left() + 8.0 + self.active as f32 * (tab_w + 2.0);
-            let hx = anim::tween(&ctx, Id::new("active-x"), target_x, 0.26, anim::out_expo);
-            let hw = anim::tween(&ctx, Id::new("active-w"), tab_w, 0.26, anim::out_expo);
+            let hx = anim::tween(&ctx, Id::new("active-x"), target_x, 0.34, anim::spring);
+            let hw = anim::tween(&ctx, Id::new("active-w"), tab_w, 0.34, anim::spring);
             let tint = anim::tween(&ctx, Id::new("active-tint"), if t.kind == TabKind::Normal { 0.0 } else { 1.0 }, 0.26, anim::out_cubic);
             let kc = kind_color(t.kind).unwrap_or(PV);
             let nbg = nav_bg(pal);
@@ -351,7 +453,7 @@ impl App {
         for (i, (id, title, url, loading, kind, born)) in tabs.into_iter().enumerate() {
             let tid = Id::new(("tab", id));
             // Tabs glide to their slot when others open or close.
-            let ax = anim::tween(&ctx, tid.with("x"), x, 0.24, anim::out_expo);
+            let ax = anim::tween(&ctx, tid.with("x"), x, 0.32, anim::spring);
             let aw = anim::tween(&ctx, tid.with("w"), tab_w, 0.24, anim::out_expo);
             let rect = Rect::from_min_size(pos2(ax, strip.top() + 6.0), vec2(aw, 32.0));
             x += tab_w + 2.0;
@@ -377,14 +479,15 @@ impl App {
             }
 
             // Tab-in: fade in place (nothing drawn outside the strip).
-            let e = if anim { anim::out_expo(((t_now - born) / 0.32) as f32) } else { 1.0 };
-            if e < 1.0 {
+            let k = if anim { ((t_now - born) / 0.36) as f32 } else { 1.0 };
+            if k < 1.0 {
                 ctx.request_repaint();
             }
+            let e = anim::spring(k);
             let mut tp = p.clone();
-            tp.set_opacity(e);
-            // Goat's tab-in: fade and grow from 94% (stays inside the tab strip).
-            let r = Rect::from_center_size(rect.center(), rect.size() * (0.94 + 0.06 * e));
+            tp.set_opacity(anim::out_cubic(k * 1.6));
+            // Goat's tab-in: rise from 8px below and grow from 94%, with a little spring.
+            let r = Rect::from_center_size(rect.center() + vec2(0.0, 8.0 * (1.0 - e)), rect.size() * (0.94 + 0.06 * e));
             self.paint_tab(&tp, r, pal, &title, &url, loading, kind, active, hovered, narrow, show_close, close.hovered(), i > 0 && !prev_lit, tid, t_now, anim);
             prev_lit = active || hovered;
             resp.on_hover_text_at_pointer(&title);
@@ -551,6 +654,23 @@ impl App {
         let mut rx = nav.right() - 8.0;
         let cog = btn(rx - 32.0);
         rx -= 36.0;
+        // Profile logo (only when there's more than one profile): click for Profiles.
+        if let Some((glyph, color)) = self.profile_badge.clone() {
+            let r = btn(rx - 32.0);
+            rx -= 36.0;
+            let resp = ui.interact(r, Id::new("profile-badge"), Sense::click());
+            let h = crate::anim::hover(&ctx, Id::new("profile-badge-h"), resp.hovered(), 0.15);
+            let c = r.center();
+            p.circle_filled(c, 12.0 + 1.0 * h, color);
+            if h > 0.0 {
+                p.circle_stroke(c, 14.5, Stroke::new(1.5, alpha(color, 0.5 * h)));
+            }
+            p.text(c + vec2(0.0, 0.5), Align2::CENTER_CENTER, &glyph, bold(13.0), Color32::from_rgb(0x10, 0x12, 0x14));
+            let name = if crate::store::launch().profile.is_empty() { "Default".to_string() } else { crate::store::launch().profile.clone() };
+            if resp.on_hover_text(format!("Profile: {name}")).clicked() {
+                cmds.push(Cmd::OpenUrl(format!("{}/settings#profiles", crate::INTERNAL_BASE), true));
+            }
+        }
         // Shield: icon + count.
         let ab = self.sh.adblock.clone();
         let host = self.active_tab().map(|t| crate::adblock::host_of(&t.page_url.lock().unwrap())).unwrap_or_default();
@@ -600,7 +720,7 @@ impl App {
         // Find bar.
         let find_w = 10.0 + 160.0 + 64.0 + 26.0 * 3.0 + 4.0;
         // The find bar glides in, and the address bar narrows smoothly to make room.
-        let find_t = anim::tween(&ctx, Id::new("find-open"), if self.find_open { 1.0 } else { 0.0 }, 0.28, anim::out_expo);
+        let find_t = anim::tween(&ctx, Id::new("find-open"), if self.find_open { 1.0 } else { 0.0 }, 0.34, anim::spring);
         let findr = Rect::from_min_size(pos2(rx - find_w, cy - 16.0), vec2(find_w, 32.0));
         rx -= (find_w + 6.0) * find_t;
 
@@ -664,8 +784,11 @@ impl App {
             };
             icons::draw(&p, Rect::from_min_size(pos2(torr.left() + 9.0, cy - 7.0), Vec2::splat(14.0)), icons::ONION, alpha(fg, pulse), 1.3);
             p.text(pos2(torr.left() + 28.0, cy), Align2::LEFT_CENTER, &tor_label, bold(12.0), fg);
-            if r.on_hover_text(format!("Tor: {}. Click for a new Tor tab.", tor_state.message)).clicked() {
-                cmds.push(Cmd::NewTorTab);
+            // In a Tor window it shows the site's circuit (like Tor Browser); elsewhere it opens a Tor window.
+            let in_tor = self.window_kind == TabKind::Tor;
+            let tip = if in_tor { format!("Tor: {}. Click to see this site's circuit.", tor_state.message) } else { format!("Tor: {}. Click for a new Tor tab.", tor_state.message) };
+            if r.on_hover_text(tip).clicked() {
+                cmds.push(if in_tor { Cmd::ShowTorCircuit(to_screen(&ctx, pos2(torr.right(), torr.bottom() + 4.0))) } else { Cmd::NewTorTab });
             }
         }
         // Shield.
@@ -687,10 +810,10 @@ impl App {
             ctx.data_mut(|d| d.insert_temp(bump_id, count));
             let bt: f64 = ctx.data(|d| d.get_temp(Id::new("shield-bump-t")).unwrap_or(-10.0));
             let k = anim::since(&ctx, bt, 0.26);
-            // Goat's bump: grow to 1.35× at 40%, spring back.
-            // A soft glow when the count goes up (no bouncing).
+            // Goat's bump: the shield grows to 1.35× at 40%, then springs back.
             let glow = if k < 1.0 { 1.0 - anim::out_cubic(k) } else { 0.0 };
-            let ir = Rect::from_min_size(pos2(shield.left() + 10.0, cy - 8.0), Vec2::splat(16.0));
+            let grow = anim::tween(&ctx, Id::new("shield-grow"), if r.hovered() { 1.22 } else { 1.0 }, 0.32, anim::ease_bounce);
+            let ir = Rect::from_center_size(pos2(shield.left() + 18.0, cy), Vec2::splat(16.0 * anim::bump(k, 1.35) * grow));
             let fill = if on_t > 0.01 { Some(alpha(pal.accent, 0.30 * on_t)) } else { None };
             icons::draw_filled(&p, ir, icons::SHIELD, col, 1.6, fill);
             p.text(pos2(ir.right() + 5.0, cy), Align2::LEFT_CENTER, &shield_label, bold(13.0), mix(pal.accent2, col, glow * 0.8));
@@ -712,7 +835,8 @@ impl App {
             if h > 0.0 {
                 p.rect_filled(cog, 8, alpha(pal.bg3, h.min(1.0)));
             }
-            let ang = if anim { h * std::f32::consts::FRAC_PI_2 } else { 0.0 };
+            // A quarter turn with a little overshoot, then it settles (and turns back on leave).
+            let ang = if anim { anim::tween(&ctx, Id::new("cog-rot"), if r.hovered() { std::f32::consts::FRAC_PI_2 } else { 0.0 }, 0.32, anim::ease_bounce) } else { 0.0 };
             icons::draw_rot(&p, Rect::from_center_size(cog.center(), Vec2::splat(17.0)), icons::COG, pal.text, 1.3, ang);
             if r.on_hover_text("Menu").clicked() {
                 cmds.push(Cmd::Popup(Popup::Menu, to_screen(&ctx, pos2(cog.right(), cog.bottom() + 2.0))));
@@ -753,6 +877,15 @@ impl App {
             p.text(b.center(), Align2::CENTER_CENTER, label, bold(11.0), fg);
             x += w + 4.0;
         }
+        // "No GPU" pill in a no-hardware-acceleration window.
+        if crate::store::no_gpu_window() {
+            let label = "No GPU";
+            let w = text_width(ui, label, bold(11.0)) + 16.0;
+            let b = Rect::from_min_size(pos2(x - 4.0, cy - 9.0), vec2(w, 18.0));
+            p.rect_filled(b, 9, alpha(pal.muted, 0.22));
+            p.text(b.center(), Align2::CENTER_CENTER, label, bold(11.0), pal.text);
+            x += w + 4.0;
+        }
         // Security indicator.
         if !focused {
             if url.starts_with("https://") {
@@ -787,9 +920,9 @@ impl App {
             }
             ctx.data_mut(|d| d.insert_temp(pop_id, bookmarked));
             let t0: f64 = ctx.data(|d| d.get_temp(pop_id.with("t")).unwrap_or(-10.0));
-            let k = anim::since(&ctx, t0, 0.32);
-            let _ = k;
-            let ir = Rect::from_center_size(star.center(), Vec2::splat(15.0));
+            let k = anim::since(&ctx, t0, 0.42);
+            // Goat's star-pop: grows to 1.45× and springs back when you bookmark.
+            let ir = Rect::from_center_size(star.center(), Vec2::splat(15.0 * anim::bump(k, 1.45)));
             // Fill fades in/out smoothly.
             let fill = anim::hover(&ctx, id.with("star-fill"), bookmarked, 0.25);
             icons::draw_filled(&p, ir, icons::STAR, col, 1.6, if fill > 0.01 { Some(alpha(pal.accent, fill)) } else { None });
@@ -814,6 +947,22 @@ impl App {
             }
         }
 
+        // Speaker while the tab plays sound (or isn't at 100% volume): click for its volume slider.
+        let (playing, vol) = self.active_tab().map(|t| (t.playing, t.volume)).unwrap_or((false, 1.0));
+        if (playing || (vol - 1.0).abs() > 0.001) && !focused {
+            let sr = Rect::from_min_size(pos2(right - 26.0, cy - 13.0), Vec2::splat(26.0));
+            right -= 30.0;
+            let r = ui.interact(sr, id.with("vol"), Sense::click());
+            let open = matches!(self.popup, Some((Popup::Volume, _)));
+            if r.hovered() || open {
+                p.rect_filled(sr, 6, pal.bg3);
+            }
+            let col = if (vol - 1.0).abs() > 0.001 { pal.accent } else if r.hovered() { pal.text } else { pal.muted };
+            icons::draw(&p, Rect::from_center_size(sr.center(), Vec2::splat(15.0)), if vol <= 0.001 { icons::SPEAKER_OFF } else { icons::SPEAKER }, col, 1.5);
+            if r.on_hover_text(format!("Tab volume: {}%", (vol * 100.0).round())).clicked() {
+                cmds.push(Cmd::Popup(Popup::Volume, to_screen(&ctx, pos2(sr.right() + 12.0, rect.bottom() + 4.0))));
+            }
+        }
         // Magnifier while the page isn't at 100%: click for the zoom bubble.
         if zoom_btn && !focused {
             let zr = Rect::from_min_size(pos2(right - 26.0, cy - 13.0), Vec2::splat(26.0));
@@ -1086,7 +1235,8 @@ impl App {
             return;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(120));
-        let e = if anim { anim::out_expo(((t - toast.born) / 0.35) as f32) } else { 1.0 };
+        let tk = if anim { ((t - toast.born) / 0.4) as f32 } else { 1.0 };
+        let e = anim::spring(tk);
         // Fade out over the last 0.2s.
         let fade = (((toast.until - t) / 0.2) as f32).clamp(0.0, 1.0);
         if e < 1.0 {
@@ -1098,10 +1248,10 @@ impl App {
         let aw = action.as_ref().map(|(l, _)| text_width(ui, l, bold(12.0)) + 22.0).unwrap_or(0.0);
         let w = 24.0 + tw + aw;
         let r0 = Rect::from_min_size(pos2(full.right() - CONTROLS_W - 8.0 - w, full.top() + 5.0), vec2(w, 28.0));
-        // Goat's toast-in: fade and grow from 96%.
-        let r = Rect::from_center_size(r0.center(), r0.size() * (0.96 + 0.04 * e.clamp(0.0, 1.0)));
+        // Goat's toast-in: drop 8px from above and grow from 96%, springy.
+        let r = Rect::from_center_size(r0.center() - vec2(0.0, 8.0 * (1.0 - e)), r0.size() * (0.96 + 0.04 * e));
         let mut p = ui.painter().clone();
-        p.set_opacity(e.clamp(0.0, 1.0) * fade);
+        p.set_opacity(anim::out_cubic(tk * 1.6) * fade);
         paint::shadow(&p, r, 8.0, pal.dark);
         p.rect_filled(r, 8, pal.bg3);
         p.rect_stroke(r, 8, Stroke::new(1.0, pal.line), StrokeKind::Inside);

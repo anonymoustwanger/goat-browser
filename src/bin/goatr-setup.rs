@@ -297,6 +297,7 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, step: &
             let _ = std::fs::copy(&me, &to);
         }
     }
+    let _ = std::fs::write(dir.join("THIRD-PARTY-NOTICES.txt"), include_str!("../../THIRD-PARTY-NOTICES.txt"));
     let marker = serde_json::json!({ "version": rel.version, "installed": chrono::Local::now().to_rfc3339() });
     let _ = std::fs::write(dir.join(MARKER), marker.to_string());
 

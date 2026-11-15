@@ -49,8 +49,12 @@ pub fn resolve_input(settings: &Settings, input: &str) -> String {
         return format!("{INTERNAL_BASE}/newtab");
     }
     let lower = s.to_lowercase();
-    if let Some(rest) = lower.strip_prefix("goatr://") {
-        return format!("{INTERNAL_BASE}/{}", rest.trim_start_matches("localhost/"));
+    if let Some(rest) = s.strip_prefix("goat-extension://").or_else(|| s.strip_prefix("Goat-extension://")) {
+        return format!("chrome-extension://{rest}");
+    }
+    // goat://settings (and goatr://, edge://, chrome:// for Goatr's own pages).
+    if let Some(u) = browser_page(&lower) {
+        return u;
     }
     let has_scheme = ["http://", "https://", "file://", "about:", "data:", "view-source:", "edge:"]
         .iter()
@@ -73,12 +77,49 @@ pub fn resolve_input(settings: &Settings, input: &str) -> String {
     format!("{}{}", settings.search_prefix(), urlencoding::encode(s))
 }
 
+/// goat://… (also goatr://, edge://, chrome://, about:) → Goatr's own page for it, if it has one.
+pub fn browser_page(url: &str) -> Option<String> {
+    let l = url.trim().to_lowercase();
+    let rest = ["goat://", "goatr://", "edge://", "chrome://", "about:"].iter().find_map(|p| l.strip_prefix(p))?;
+    let rest = rest.trim_start_matches("localhost/");
+    let (name, tail) = match rest.find(['/', '?', '#']) {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let page = match name {
+        "" | "newtab" | "new-tab-page" | "home" => "newtab",
+        "settings" | "preferences" => "settings",
+        "history" => "history",
+        "bookmarks" | "favorites" | "favourites" => "bookmarks",
+        "downloads" => "downloads",
+        "extensions" | "apps" => "extensions",
+        "tor" => "tor",
+        _ if l.starts_with("goat://") || l.starts_with("goatr://") => name,
+        _ => return None,
+    };
+    // Keep ?id=… for extensions; "/settings/privacy" → settings#privacy.
+    let tail = tail.trim_start_matches('/');
+    Some(match page {
+        "extensions" => format!("{INTERNAL_BASE}/extensions{}", if tail.starts_with('?') { tail.to_string() } else { String::new() }),
+        "settings" if !tail.is_empty() && !tail.starts_with('?') && !tail.starts_with('#') => format!("{INTERNAL_BASE}/settings#{}", tail.split('/').next().unwrap_or("")),
+        _ => format!("{INTERNAL_BASE}/{page}{}", if tail.starts_with('?') || tail.starts_with('#') { tail } else { "" }),
+    })
+}
+
 /// How a URL is shown in the address bar.
 pub fn display_url(url: &str) -> String {
+    // The error page shows the address that failed.
+    if let Some(q) = url.strip_prefix(INTERNAL_BASE).and_then(|p| p.strip_prefix("/neterror?")) {
+        return query_param(q, "u").unwrap_or_default();
+    }
     match url.strip_prefix(INTERNAL_BASE) {
         Some(p) if p.starts_with("/newtab") || p == "/tor" || p.starts_with("/go") => String::new(),
-        Some(rest) => format!("goatr:/{}", if rest.is_empty() { "/newtab" } else { rest }),
-        None => url.to_string(),
+        Some(rest) => format!("goat:/{}", if rest.is_empty() { "/newtab" } else { rest }),
+        // Extension pages: goat-extension://<id>/… (typing that opens the real page).
+        None => match url.strip_prefix("chrome-extension://") {
+            Some(rest) => format!("goat-extension://{rest}"),
+            None => url.to_string(),
+        },
     }
 }
 
@@ -125,9 +166,16 @@ pub fn handle(sh: &Arc<Shared>, req: Request<Vec<u8>>) -> Resp {
         "/history" => history(&s, look, &query_param(&query, "q").unwrap_or_default()),
         "/bookmarks" => bookmarks(&s, look),
         "/downloads" => downloads(&s, look),
-        "/extensions" => page(look, "Extensions", "", &format!("<script>location.replace('{INTERNAL_BASE}/settings#extensions')</script>")),
+        "/extensions" => {
+            // edge://extensions/?id=… from an extension: jump to that extension's row.
+            let id = query.split('&').find_map(|kv| kv.strip_prefix("id=")).unwrap_or("");
+            let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            let target = if id.is_empty() { "extensions".to_string() } else { format!("ext-{id}") };
+            page(look, "Extensions", "", &format!("<script>location.replace('{INTERNAL_BASE}/settings#{target}')</script>"))
+        }
         "/settings" => settings(&s, look, sh),
         "/tor" => tor_page(look),
+        "/neterror" => net_error(look, &query_param(&query, "u").unwrap_or_default(), query_param(&query, "e").and_then(|e| e.parse().ok()).unwrap_or(0)),
         _ => page(look, "Not found", "", "<main class=\"solo\"><h1>Page not found</h1></main>"),
     }
 }
@@ -188,6 +236,20 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
                 Err(e) => respond(400, "text/plain", e.into_bytes()),
             }
         }
+        // Allow or stop an extension in private windows (title = folder, url = "on"/"off").
+        "extensions/private" => {
+            {
+                let mut s = sh.store.lock().unwrap();
+                let list = &mut s.data.settings.private_extensions;
+                list.retain(|f| *f != b.title);
+                if b.url == "on" {
+                    list.push(b.title.clone());
+                }
+                s.save();
+            }
+            notify(Notice::StoreChanged);
+            return ok();
+        }
         "extensions/open_folder" => {
             let dir = extinstall::ext_dir();
             let _ = std::fs::create_dir_all(&dir);
@@ -213,6 +275,25 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
                 }
                 let _ = std::fs::create_dir_all(crate::store::app_dir().join("profiles").join(&name));
                 notify(Notice::OpenProfile(name));
+            }
+            // Start-up profile: url = "ask", or title = the profile to always open.
+            "startup" => {
+                if b.url == "ask" {
+                    crate::store::set_startup_profile(None);
+                } else {
+                    crate::store::set_startup_profile(Some(&name));
+                }
+            }
+            // Logo: url = {"emoji": "…", "color": "#rrggbb"}.
+            "logo" => {
+                let mut logo: crate::store::ProfileLogo = serde_json::from_str(&b.url).unwrap_or_default();
+                logo.emoji.clear();
+                let ok_color = logo.color.is_empty() || crate::store::LOGO_COLORS.contains(&logo.color.as_str());
+                if !ok_color {
+                    return respond(400, "text/plain", b"Unknown logo".to_vec());
+                }
+                crate::store::set_profile_logo(&name, logo);
+                notify(Notice::StoreChanged);
             }
             "delete" => {
                 if name.is_empty() || name == crate::store::launch().profile {
@@ -358,6 +439,11 @@ html { overflow-x: hidden; }
 :root[data-gradients="off"] .ticon { background: var(--bg-2); }
 .hico { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg-2)); }
 .exticon { color: var(--accent); }
+.plogo { width: 34px; height: 34px; border-radius: 50%; border: none; flex: none; display: grid; place-items: center; font-size: 16px; font-weight: 700; color: #101214; cursor: pointer; padding: 0; }
+.plogo:hover { filter: brightness(1.1); }
+.logopick { margin: 4px 0 10px 46px; padding: 10px; border-radius: 12px; background: var(--bg3, rgba(127,127,127,.12)); display: grid; gap: 10px; }
+.lp-colors { display: flex; flex-wrap: wrap; gap: 6px; }
+.lp-colors button { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); padding: 0; }
 .ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
 /* list pages (history, bookmarks, downloads) */
 .hday li .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -373,6 +459,8 @@ html { overflow-x: hidden; }
 .side a.on { box-shadow: inset 2px 0 0 var(--accent); }
 .theme-card:not(.system) .swatch { background: var(--bg); }
 .ext .x { font-size: 18px; }
+.ext:target { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.extpriv { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; margin-right: 6px; }
 .storeform { display: flex; gap: 8px; padding: 0 0 14px; }
 .storeform input { flex: 1; }
 /* private / Tor new tab */
@@ -528,6 +616,43 @@ api('tor/start').then(poll);
 </script>"#
         .replace("INTERNAL", INTERNAL_BASE);
     page_doc(look, "Tor tab", "private", "", &body)
+}
+
+/// Goatr's "can't reach this page" (replaces the engine's Edge-branded one).
+fn net_error(look: &Look, url: &str, code: i32) -> Resp {
+    let host = short_host(url);
+    let host = if host.is_empty() { url.to_string() } else { host };
+    let (head, why) = match code {
+        13 => ("Can't find this site", "The address may be mistyped, or your DNS can't look it up."),
+        12 | 6 => ("Can't connect to this site", "The site refused the connection or isn't reachable right now."),
+        7 => ("This site took too long to answer", "It may be down or very slow."),
+        9 | 10 | 11 => ("The connection was interrupted", "Your network may have dropped, or the site closed the connection."),
+        1 | 2 | 3 | 4 | 5 => ("This site's connection isn't secure", "Its certificate is invalid, expired or revoked, so Goatr stopped before sending anything."),
+        15 => ("This page redirects in a loop", "Try clearing this site's cookies."),
+        17 | 18 => ("This page needs you to sign in", "The site or a proxy asked for a password Goatr couldn't give."),
+        _ => ("Can't reach this page", "Something went wrong loading it."),
+    };
+    let js = serde_json::to_string(url).unwrap_or_default();
+    let body = format!(r#"<main class="neterr">
+<h1>{head}</h1>
+<p class="host">{h}</p>
+<p class="why">{why}</p>
+<ul class="tips"><li>Check the address and your internet connection</li><li>Turn off a VPN or proxy if you use one</li><li>Try again in a moment</li></ul>
+<div class="acts"><button class="pri" onclick="location.replace(U)">Try again</button></div>
+</main>
+<script>const U = {js};</script>"#, h = esc(&host));
+    let css = r#"
+.neterr { max-width: 520px; margin: 14vh auto 0; text-align: center; }
+.neterr h1 { margin: 0 0 6px; animation: rise .5s cubic-bezier(.34,1.56,.64,1) both; font-size: 26px; }
+.neterr .host { margin: 0 0 14px; font-weight: 600; color: var(--accent); word-break: break-all; }
+.neterr .why { color: var(--muted); margin: 0 0 16px; }
+.neterr .tips { text-align: left; display: inline-block; color: var(--muted); margin: 0 0 22px; padding-left: 20px; line-height: 1.7; }
+@keyframes rise { from { transform: scale(.9); opacity: 0 } }
+.neterr .acts button { font: inherit; font-size: 14px; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 10px; padding: 9px 24px; cursor: pointer; transition: transform .25s cubic-bezier(.34,1.56,.64,1), filter .15s; }
+.neterr .acts button:hover { transform: scale(1.06); filter: brightness(1.1); }
+.neterr .acts button:active { transform: scale(.96); }
+"#;
+    page_doc(look, &format!("Can't reach {host}"), "", css, &body)
 }
 
 // ------------------------------------------------------------------ history / bookmarks / downloads
@@ -836,14 +961,21 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
 
     let mut exts = String::new();
     for e in extinstall::list() {
+        let folder_js = esc(&serde_json::to_string(&e.folder).unwrap_or_default());
+        let in_private = st.private_extensions.contains(&e.folder);
         exts.push_str(&format!(
-            "<div class=\"ext\"><span class=\"exticon\">{}</span><span class=\"extinfo\"><b>{}</b><small>{}{}</small></span>\
+            "<div class=\"ext\" id=\"ext-{}\"><span class=\"exticon\">{}</span><span class=\"extinfo\"><b>{}</b><small>{}{}</small></span>\
+             <label class=\"extpriv\" title=\"Also run this extension in private windows\"><span>Allow in private</span>\
+             <input type=\"checkbox\" class=\"toggle\" {} onchange=\"privext({}, this.checked)\"></label>\
              <button class=\"x\" title=\"Remove\" onclick=\"rmext({})\">{}</button></div>",
+            esc(&e.folder),
             esc(&e.name.chars().next().unwrap_or('?').to_uppercase().to_string()),
             esc(&e.name),
             if e.version.is_empty() { String::new() } else { format!("v{} · ", esc(&e.version)) },
             esc(if !e.valid { "Broken: no manifest.json" } else if e.description.is_empty() { &e.folder } else { &e.description }),
-            esc(&serde_json::to_string(&e.folder).unwrap_or_default()),
+            if in_private { "checked" } else { "" },
+            folder_js,
+            folder_js,
             svg(IC_TRASH),
         ));
     }
@@ -914,6 +1046,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <div class="card">
       <p class="hint">Each profile has its own cookies, history, bookmarks, extensions and settings, in its own window. You're in: <b>CURPROFILE</b>.</p>
       <div class="extlist">PROFILELIST</div>
+      <label class="row"><span><b>When Goatr starts</b><small>With more than one profile, Goatr can ask which one to use, or always open the same one.</small></span>
+        <select id="startprof" onchange="setStartProfile(this.value)">STARTPROFOPTS</select>
+      </label>
       <form class="inline" id="profform">
         <input id="profname" placeholder="New profile name, e.g. Work" maxlength="40" spellcheck="false">
         <button>Add and open</button>
@@ -1099,6 +1234,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Hardware acceleration</b><small>Pages, video and scrolling use your graphics card. Turn off if pages flicker, go black or crash. <em class="restart" data-restart="gpu" hidden>Restart Goatr to apply.</em></small></span>
         TOGGLE_GPU
       </label>
+      <label class="row"><span><b>Audio for streaming</b><small>Plays page sound from Goatr itself, so Discord and other streaming apps pick it up when you share the Goatr window. Experimental.</small></span>
+        TOGGLE_STREAMAUDIO
+      </label>
       <label class="row"><span><b>Memory saver</b><small>Background tabs you haven't used for a while free most of their memory. They come back when you open them.</small></span>
         <select data-key="sleep_after_min" data-number="1">SLEEPOPTS</select>
       </label>
@@ -1157,6 +1295,35 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
 <script>
 // Settings that only take effect after a restart show a note next to them.
 // ---- profiles
+const LOGO_COLORS = LOGOCOLORS_JSON;
+// Profile logo picker: the first letter on a colour.
+function pickLogo(btn, name) {
+  const open = btn.closest('.ext').nextElementSibling;
+  document.querySelectorAll('.logopick').forEach((e) => e.remove());
+  if (open && open.classList.contains('logopick')) return; // second click closes it
+  const box = document.createElement('div');
+  box.className = 'logopick';
+  const cur = { emoji: '', color: btn.dataset.color || '' };
+  const save = async () => {
+    await api('profiles/logo', { title: name, url: JSON.stringify(cur) });
+    btn.dataset.emoji = cur.emoji; btn.dataset.color = cur.color;
+    if (cur.color) btn.style.background = cur.color;
+    btn.textContent = ((name || 'Default')[0] || '?').toUpperCase();
+  };
+  const co = document.createElement('div'); co.className = 'lp-colors';
+  LOGO_COLORS.forEach((c) => {
+    const b = document.createElement('button');
+    b.style.background = c; b.title = c;
+    b.onclick = (ev) => { ev.preventDefault(); cur.color = c; save(); };
+    co.appendChild(b);
+  });
+  box.append(co);
+  btn.closest('.ext').after(box);
+}
+async function setStartProfile(v) {
+  if (v === '*ask') await api('profiles/startup', { title: '', url: 'ask' });
+  else await api('profiles/startup', { title: v, url: '' });
+}
 async function openProfile(name) { await api('profiles/open', {title: name}); }
 async function deleteProfile(name) {
   if (!confirm('Delete the profile “' + name + '”? Its cookies, history, bookmarks and extensions are deleted. This can\'t be undone.')) return;
@@ -1245,6 +1412,12 @@ $('storeform').addEventListener('submit', async (e) => {
   const r = await fetch('INTERNAL/api/extensions/install', {method: 'POST', headers: {'X-Goatr': '1', 'Content-Type': 'application/json'}, body: JSON.stringify({url: $('storeurl').value})});
   $('extmsg').textContent = r.ok ? 'Downloading… you’ll get a message when it’s ready.' : await r.text();
 });
+// edge://extensions/?id=… for an extension that isn't installed here: show the list.
+if (location.hash.startsWith('#ext-') && !document.getElementById(location.hash.slice(1))) location.hash = '#extensions';
+async function privext(folder, on) {
+  await api('extensions/private', {title: folder, url: on ? 'on' : 'off'});
+  $('extmsg').textContent = on ? 'Runs in private windows opened from now on.' : 'Off in private windows opened from now on.';
+}
 async function rmext(folder) {
   if (!confirm('Remove this extension?')) return;
   await api('extensions/remove', {title: folder});
@@ -1285,9 +1458,14 @@ addEventListener('scroll', mark, {passive: true}); mark();
                     let label = if p.is_empty() { "Default".to_string() } else { p.clone() };
                     let js = esc(&serde_json::to_string(p).unwrap_or_default());
                     let this = *p == cur;
+                    let (glyph, color) = crate::store::profile_logo(p);
+                    let stored = crate::store::profile_logos().remove(p).unwrap_or_default();
                     format!(
-                        "<div class=\"ext\"><span class=\"exticon\">{}</span><span class=\"extinfo\"><b>{}</b><small>{}</small></span>{}{}</div>",
-                        esc(&label.chars().next().unwrap_or('?').to_uppercase().to_string()),
+                        "<div class=\"ext\"><button class=\"plogo\" style=\"background:{}\" data-emoji=\"{}\" data-color=\"{}\" title=\"Change logo\" onclick=\"pickLogo(this, {js})\">{}</button><span class=\"extinfo\"><b>{}</b><small>{}</small></span>{}{}</div>",
+                        esc(&color),
+                        esc(&stored.emoji),
+                        esc(&stored.color),
+                        esc(&glyph),
                         esc(&label),
                         if this { "This window" } else if p.is_empty() { "The main profile" } else { "Separate cookies, history and extensions" },
                         if this { String::new() } else { format!("<button onclick=\"openProfile({js})\">Open</button>") },
@@ -1296,6 +1474,17 @@ addEventListener('scroll', mark, {passive: true}); mark();
                 })
                 .collect::<String>()
         })
+        .replace("STARTPROFOPTS", &{
+            let cur = crate::store::startup_profile();
+            let mut o = format!("<option value=\"*ask\"{}>Ask which profile</option>", if cur.is_none() { " selected" } else { "" });
+            for p in crate::store::profiles() {
+                let label = if p.is_empty() { "Default".to_string() } else { p.clone() };
+                let sel = cur.as_deref() == Some(p.as_str());
+                o.push_str(&format!("<option value=\"{}\"{}>Always open {}</option>", esc(&p), if sel { " selected" } else { "" }, esc(&label)));
+            }
+            o
+        })
+        .replace("LOGOCOLORS_JSON", &serde_json::to_string(&crate::store::LOGO_COLORS).unwrap_or_default())
         .replace("BUILTIN_JSON", &builtin_json)
         .replace("CUSTOM_JSON", &custom_json)
         .replace("CURTHEME", &serde_json::to_string(&st.theme).unwrap_or_default())
@@ -1321,6 +1510,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("PXPORT", &esc(&st.proxy_port))
         .replace("PXMANUAL_HIDDEN", if st.proxy_mode == "manual" { "false" } else { "true" })
         .replace("TOGGLE_SKIPEXT", &toggle("adblock_skip_extensions", st.adblock_skip_extensions))
+        .replace("TOGGLE_STREAMAUDIO", &toggle("discord_audio", st.discord_audio))
         .replace("TOGGLE_GPU", &toggle("hardware_accel", st.hardware_accel).replace(">", " data-restartkey=\"gpu\">"))
         .replace("TOGGLE_HTTPS", &toggle("https_only", st.https_only))
         .replace("DNSOPTS", &privacy::DNS_PROVIDERS.iter().map(|(id, name, _, _)| format!("<option value=\"{id}\"{}>{name}</option>", if *id == st.dns_provider { " selected" } else { "" })).collect::<String>())

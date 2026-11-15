@@ -109,6 +109,35 @@ pub fn host_of(url: &str) -> String {
 pub const BASE_CSS: &str = "ins.adsbygoogle,[id^='google_ads_iframe'],[id^='div-gpt-ad'],iframe[src*='doubleclick.net'],\
 iframe[src*='googlesyndication.com'],.adsbygoogle{display:none!important}";
 
+/// Some lists (Peter Lowe's) arrive as bare host names, one per line. Read as filter rules,
+/// "t.co" would match anywhere in a URL (even "usercontent.com"), so turn each bare host
+/// into a whole-domain rule: "||t.co^".
+fn hosts_to_rules(text: &str) -> String {
+    let is_host = |l: &str| {
+        !l.is_empty()
+            && l.contains('.')
+            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    };
+    let mut out = String::with_capacity(text.len() + text.len() / 4);
+    for line in text.lines() {
+        let l = line.trim();
+        // Also hosts-file style lines: "0.0.0.0 example.com" / "127.0.0.1 example.com".
+        let host = match l.split_once(char::is_whitespace) {
+            Some((ip, h)) if matches!(ip, "0.0.0.0" | "127.0.0.1") => h.trim(),
+            _ => l,
+        };
+        if is_host(host) && !host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            out.push_str("||");
+            out.push_str(host);
+            out.push_str("^\n");
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn count_rules(text: &str) -> usize {
     text.lines().filter(|l| {
         let l = l.trim();
@@ -128,6 +157,7 @@ fn assemble(level: Level, custom: &str) -> (FilterSet, usize) {
         for (file, _, l) in LISTS {
             if *l == lvl {
                 if let Ok(t) = std::fs::read_to_string(dir().join(file)) {
+                    let t = if *file == "peterlowe.txt" { hosts_to_rules(&t) } else { t };
                     n += count_rules(&t);
                     set.add_filter_list(t, ParseOptions::default());
                     have_list = true;

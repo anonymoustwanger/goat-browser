@@ -43,6 +43,8 @@ pub const COPY: Icon = &[Rect(5.0, 5.0, 8.5, 8.5, 1.5), Path("M3 10.5V3.5c0-.6.4
 pub const EDIT: Icon = &[Path("M10.5 2.5 13.5 5.5 6 13H3v-3z")];
 pub const MASK: Icon = &[Path("M1.5 6.5c2-1.4 4.2-1.6 6.5-.4 2.3-1.2 4.5-1 6.5.4-.2 2.6-1.6 4.4-3.6 4.4-1.3 0-2.2-.8-2.9-1.9-.7 1.1-1.6 1.9-2.9 1.9-2 0-3.4-1.8-3.6-4.4z"), Circle(5.0, 7.8, 0.9), Circle(11.0, 7.8, 0.9)];
 pub const USER: Icon = &[Circle(8.0, 5.5, 2.8), Path("M2.8 14c.6-2.8 2.7-4.4 5.2-4.4s4.6 1.6 5.2 4.4")];
+pub const SPEAKER: Icon = &[Path("M2.5 6.2h2.3L8 3.4v9.2L4.8 9.8H2.5z"), Path("M10.4 5.6a3.4 3.4 0 0 1 0 4.8"), Path("M12.2 3.8a6 6 0 0 1 0 8.4")];
+pub const SPEAKER_OFF: Icon = &[Path("M2.5 6.2h2.3L8 3.4v9.2L4.8 9.8H2.5z"), Path("m10.5 6 3.5 4m0-4-3.5 4")];
 pub const EXTERNAL: Icon = &[Path("M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5H7")];
 pub const PIN: Icon = &[Path("M9.6 1.9 14 6.3l-1.3.4-2.9 2.9-.4 3.1-1.1 1.1-2.2-2.2-3 3-.9-.1v-.9l3-3-2.2-2.2 1.1-1.1 3.1-.4 2.9-2.9z")];
 pub const UP: Icon = &[Path("m4 10 4-4 4 4")];
@@ -322,20 +324,58 @@ pub fn draw_rot(p: &Painter, rect: Rect, icon: Icon, color: Color32, width: f32,
     let stroke = Stroke::new(width * s, color);
     for el in icon {
         for (pts, closed) in element_points(el) {
-            let pts: Vec<Pos2> = pts.into_iter().map(|q| c + rot * (m(q) - c)).collect();
+            let pts: Vec<Pos2> = tidy(pts.into_iter().map(|q| c + rot * (m(q) - c)).collect(), closed);
             p.add(if closed { Shape::closed_line(pts, stroke) } else { Shape::line(pts, stroke) });
         }
     }
 }
 
 /// Like `draw`, optionally filling closed shapes first.
+/// Drop repeated points (and a closing point that equals the first). A zero-length segment
+/// has no direction, and egui's line joins then shoot out a spike at some sizes (the jagged
+/// line next to the private-window mask while it grew).
+fn tidy(mut pts: Vec<Pos2>, closed: bool) -> Vec<Pos2> {
+    pts.dedup_by(|a, b| a.distance(*b) < 0.05);
+    if closed && pts.len() > 2 && pts[0].distance(*pts.last().unwrap()) < 0.05 {
+        pts.pop();
+    }
+    // Very sharp corners (like the mask's left tip): egui's line joins point straight out of a
+    // sharp corner, and at some sizes that spike shows as a jagged line. Cut those corners
+    // with a tiny bevel instead.
+    let n = pts.len();
+    if n < 3 {
+        return pts;
+    }
+    let mut out = Vec::with_capacity(n + 4);
+    for i in 0..n {
+        let cur = pts[i];
+        let (prev, next) = if closed {
+            (Some(pts[(i + n - 1) % n]), Some(pts[(i + 1) % n]))
+        } else {
+            (if i > 0 { Some(pts[i - 1]) } else { None }, pts.get(i + 1).copied())
+        };
+        if let (Some(a), Some(b)) = (prev, next) {
+            let d1 = (cur - a).normalized();
+            let d2 = (b - cur).normalized();
+            if d1.dot(d2) < -0.3 {
+                let eps = 0.35_f32.min((cur - a).length() * 0.4).min((b - cur).length() * 0.4);
+                out.push(cur - d1 * eps);
+                out.push(cur + d2 * eps);
+                continue;
+            }
+        }
+        out.push(cur);
+    }
+    out
+}
+
 pub fn draw_filled(p: &Painter, rect: Rect, icon: Icon, color: Color32, width: f32, fill: Option<Color32>) {
     let m = mapper(rect);
     let s = rect.width().min(rect.height()) / 16.0;
     let stroke = Stroke::new(width * s, color);
     for el in icon {
         for (pts, closed) in element_points(el) {
-            let pts: Vec<Pos2> = pts.into_iter().map(&m).collect();
+            let pts: Vec<Pos2> = tidy(pts.into_iter().map(&m).collect(), closed);
             if let (Some(f), true) = (fill, closed) {
                 crate::paint::fill_fan(p, &pts, f);
             }

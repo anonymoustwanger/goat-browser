@@ -60,6 +60,10 @@ pub struct Settings {
     pub app_links_allowed: Vec<String>,
     /// Zoom remembered per site (host → factor), like Chrome.
     pub site_zoom: std::collections::BTreeMap<String, f64>,
+    /// Experimental: play page sound from Goatr.exe so Discord can stream it.
+    pub discord_audio: bool,
+    /// Extensions (folder names) that also run in private windows.
+    pub private_extensions: Vec<String>,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -117,6 +121,8 @@ impl Default for Settings {
             adblock_skip_extensions: true,
             app_links_allowed: Vec::new(),
             site_zoom: Default::default(),
+            discord_audio: false,
+            private_extensions: Vec::new(),
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
@@ -305,6 +311,71 @@ pub fn profile_dir() -> PathBuf {
     if p.is_empty() { app_dir() } else { app_dir().join("profiles").join(p) }
 }
 
+/// A profile's logo: an emoji (empty = the name's first letter) on a coloured circle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProfileLogo {
+    #[serde(default)]
+    pub emoji: String,
+    /// "#rrggbb"; empty = picked from the name.
+    #[serde(default)]
+    pub color: String,
+}
+
+/// The colours offered for profile logos.
+pub const LOGO_COLORS: [&str; 10] = ["#5fd3b3", "#6ea8ff", "#b57cf5", "#ff6fae", "#ff7a66", "#ffb347", "#ffd166", "#7bd88f", "#8b939c", "#e7e9ec"];
+
+fn logos_file() -> PathBuf {
+    app_dir().join("profiles.json")
+}
+
+/// Every profile's logo (shared by all profiles; "" = Default).
+pub fn profile_logos() -> std::collections::HashMap<String, ProfileLogo> {
+    std::fs::read_to_string(logos_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+pub fn set_profile_logo(name: &str, logo: ProfileLogo) {
+    let mut all = profile_logos();
+    all.insert(name.to_string(), logo);
+    if let Ok(t) = serde_json::to_string_pretty(&all) {
+        let _ = std::fs::write(logos_file(), t);
+    }
+}
+
+/// The logo for `name`, with defaults filled in: (emoji or letter, colour).
+pub fn profile_logo(name: &str) -> (String, String) {
+    let l = profile_logos().remove(name).unwrap_or_default();
+    let label = if name.is_empty() { "Default" } else { name };
+    let glyph = label.chars().next().unwrap_or('?').to_uppercase().to_string();
+    let color = if l.color.is_empty() {
+        let h = label.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+        LOGO_COLORS[(h as usize) % 8].to_string()
+    } else {
+        l.color
+    };
+    (glyph, color)
+}
+
+/// Which profile opens when Goatr starts (with more than one profile): None = ask,
+/// Some("") = Default, Some(name) = that profile. Kept in `startup-profile.txt`.
+pub fn startup_profile() -> Option<String> {
+    let t = std::fs::read_to_string(app_dir().join("startup-profile.txt")).ok()?;
+    let t = t.trim();
+    match t {
+        "" => None,
+        "<default>" => Some(String::new()),
+        name => Some(clean_profile(name)).filter(|n| profiles().contains(n)),
+    }
+}
+
+pub fn set_startup_profile(p: Option<&str>) {
+    let v = match p {
+        None => String::new(),
+        Some("") => "<default>".to_string(),
+        Some(n) => clean_profile(n),
+    };
+    let _ = std::fs::write(app_dir().join("startup-profile.txt"), v);
+}
+
 /// Profiles that exist: "" (default) first, then the named ones.
 pub fn profiles() -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(app_dir().join("profiles"))
@@ -316,6 +387,57 @@ pub fn profiles() -> Vec<String> {
 }
 
 /// Private and Tor windows never write history, settings or bookmarks back.
+/// A window started with `--window nogpu`: hardware acceleration off. Windows' web engine can't
+/// mix that with the normal windows' engine, so it has its own browsing data ("profile-nogpu").
+pub fn no_gpu_window() -> bool {
+    launch().window == "nogpu"
+}
+
+/// The web engine's data folder for normal tabs in this window.
+pub fn engine_dir() -> PathBuf {
+    profile_dir().join(if no_gpu_window() { "profile-nogpu" } else { "profile" })
+}
+
+/// This private window's own, throw-away browsing data: a fresh folder per private window
+/// process, so nothing carries over between private sessions (and extensions start clean).
+pub fn private_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let root = profile_dir().join("private-sessions");
+        // Leftovers from private windows that have closed (and the old shared folder).
+        let _ = std::fs::remove_dir_all(profile_dir().join("profile-private"));
+        if let Ok(rd) = std::fs::read_dir(&root) {
+            for e in rd.flatten() {
+                let pid = e.file_name().to_string_lossy().parse::<u32>().unwrap_or(0);
+                if pid != std::process::id() && !process_alive(pid) {
+                    let _ = std::fs::remove_dir_all(e.path());
+                }
+            }
+        }
+        root.join(std::process::id().to_string())
+    })
+    .clone()
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let mut code = 0u32;
+        let alive = GetExitCodeProcess(h, &mut code).is_ok() && code == 259; // STILL_ACTIVE
+        let _ = windows::Win32::Foundation::CloseHandle(h);
+        alive
+    }
+    #[cfg(not(windows))]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+}
+
 pub static READ_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn now() -> i64 {

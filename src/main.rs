@@ -7,6 +7,8 @@
 #![allow(deprecated)]
 
 mod adblock;
+#[cfg(windows)]
+mod audiorelay;
 mod anim;
 mod chrome;
 mod crashlog;
@@ -42,7 +44,11 @@ use pages::{display_url, resolve_input};
 use shared::{Notice, Shared};
 use store::Store;
 
+/// YouTube ad removal (its ads come with the video data, so address blocking can't stop them).
+const YOUTUBE_JS: &str = include_str!("youtube.js");
 const INJECT_JS: &str = include_str!("inject.js");
+/// Per-tab volume (Goatr's speaker button).
+const VOLUME_JS: &str = include_str!("volume.js");
 
 /// Where the built-in goatr:// pages live inside the webview.
 #[cfg(windows)]
@@ -59,6 +65,10 @@ pub enum Ev {
     ExtIds(Vec<(String, String)>),
     /// A page wants to open an app: (link, page it came from).
     AppLink(String, String),
+    /// Right-click in a tab.
+    PageMenu(u32, shared::PageMenu),
+    /// A tab started (true) or stopped playing sound.
+    Audio(u32, bool),
     /// Result of loading an extension that wasn't running: (folder, Ok(name, id) / Err).
     ExtLoaded(String, Result<(String, String), String>),
     Content(u32, ContentMsg),
@@ -111,6 +121,18 @@ pub enum Cmd {
     ExtConfirm(bool),
     /// Remove a site from history so it stops being suggested.
     ForgetSuggestion(String),
+    /// Turn "Audio for Discord streaming" on or off.
+    ToggleDiscordAudio,
+    /// Show the Tor circuit for the current site (anchor: below the Tor button).
+    ShowTorCircuit(egui::Pos2),
+    /// Ask Tor for new circuits, then reload the page.
+    NewTorCircuit,
+    /// Set the active tab's volume (1.0 = 100%).
+    SetVolume(f32),
+    /// Right-click menu: run the engine's own command (copy, paste, save image…).
+    PageNative(i32),
+    CopyText(String),
+    OpenPrivate(String),
     /// Answer to "Open this app?": (open, always allow for this site).
     AppLinkAnswer(bool, bool),
     /// A tab an extension asked for: (address, switch to it).
@@ -130,6 +152,8 @@ pub enum Cmd {
     NewTab,
     NewPrivateTab,
     NewTorTab,
+    /// A window with hardware acceleration off (its own process and engine).
+    NewNoGpuWindow,
     CloseTab(u32),
     SelectTab(u32),
     SelectIndex(usize),
@@ -205,6 +229,12 @@ pub enum Popup {
     AppLink,
     /// Zoom bubble under the address bar (Ctrl +/−).
     Zoom,
+    /// Tor window: the relays this site goes through (like Tor Browser's circuit display).
+    TorCircuit,
+    /// The tab's volume slider (speaker button in the address bar).
+    Volume,
+    /// Right-click menu for a page (links, images, text).
+    PageMenu,
 }
 
 pub struct Tab {
@@ -226,6 +256,11 @@ pub struct Tab {
     /// Memory saver: when this tab went to the background, and whether it's been put to rest.
     pub hidden_since: Option<f64>,
     pub low_mem: bool,
+    /// This tab's volume (1.0 = 100%, up to 6.0) and whether it's playing sound right now.
+    pub volume: f32,
+    /// Its first page has drawn (until then the web view stays hidden, so no white flash).
+    pub painted: bool,
+    pub playing: bool,
 }
 
 /// Browser profiles: the normal one (saved) and an in-memory one for Tor tabs.
@@ -279,6 +314,22 @@ pub struct App {
     pub addr_refocus: bool,
     /// The zoom bubble closes itself after this time unless the pointer is on it.
     pub zoom_bubble_until: f64,
+    /// What was right-clicked, while Goatr's page menu is open.
+    pub page_menu: Option<shared::PageMenu>,
+    /// This window's profile logo (emoji or letter, colour), shown only when there's more than
+    /// one profile. Refreshed every few seconds and when settings change.
+    pub profile_badge: Option<(String, egui::Color32)>,
+    /// Start-up "Who's browsing?" screen is showing (no tabs yet).
+    pub choosing_profile: bool,
+    /// Frame timing (for the debug log) and the monitor's refresh rate.
+    frame_stats: (std::time::Instant, u32, f32, f32),
+    refresh_hz: u32,
+    pub profile_always: bool,
+    /// The Tor circuit panel's contents (filled in by a background lookup).
+    pub tor_circuit: Arc<Mutex<TorCircuitView>>,
+    /// Page sound played from Goatr.exe for Discord (experimental).
+    #[cfg(windows)]
+    relay: Option<audiorelay::Relay>,
     last_cpu: f64,
     cpu_dirty: bool,
     /// Element-hiding work runs on its own thread so pages never wait on the window.
@@ -318,6 +369,10 @@ pub struct App {
     pub popup: Option<(Popup, Pos2)>,
     pub popup_had_focus: bool,
     pub popup_born: f64,
+    /// Frames a pop-up has been drawn while visible (it stays transparent for the first two).
+    pub popup_vis_frames: u32,
+    /// Window background (theme colour), so nothing flashes black before Goatr draws.
+    pub clear: [f32; 4],
     pub toast: Option<Toast>,
     pub fullscreen: bool,
     pub content_rect: Rect,
@@ -331,19 +386,64 @@ pub fn now(ctx: &egui::Context) -> f64 {
 }
 
 fn main() -> eframe::Result<()> {
+    // Helper process for "Audio for streaming" (see audiorelay.rs).
+    #[cfg(windows)]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(i) = args.iter().position(|a| a == "--audio-relay") {
+            if let Some(pid) = args.get(i + 1).and_then(|p| p.parse::<u32>().ok()) {
+                audiorelay::helper_main(pid);
+            }
+            return Ok(());
+        }
+    }
     crashlog::install();
     crashlog::note("start");
     // Linux only (for development): WebKitGTK needs GTK running.
     #[cfg(target_os = "linux")]
     let _ = gtk::init();
     let launch = store::launch().clone();
+    // "Always open this profile": hand over to that profile's window straight away.
+    if launch.window.is_empty() && launch.profile.is_empty() && store::profiles().len() > 1 {
+        if let Some(p) = store::startup_profile().filter(|p| !p.is_empty()) {
+            if let Ok(exe) = std::env::current_exe() {
+                let mut cmd = std::process::Command::new(exe);
+                cmd.args(["--profile", &p]);
+                if let Some(u) = &launch.url {
+                    cmd.arg(u);
+                }
+                if cmd.spawn().is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+    // Private, Tor, no-GPU and profile windows get their own taskbar button instead of being
+    // grouped with the main window (the main window keeps Windows' default, so pins still work).
+    #[cfg(windows)]
+    {
+        let id = match (launch.window.as_str(), launch.profile.as_str()) {
+            ("private", _) => Some("Goatr.Private".to_string()),
+            ("tor", _) => Some("Goatr.Tor".to_string()),
+            ("nogpu", _) => Some("Goatr.NoGPU".to_string()),
+            (_, "") => None,
+            (_, p) => Some(format!("Goatr.Profile.{}", p.replace(' ', "_"))),
+        };
+        if let Some(id) = id {
+            unsafe {
+                let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(id));
+            }
+        }
+    }
     let window_kind = match launch.window.as_str() {
         "private" => TabKind::Private,
         "tor" => TabKind::Tor,
         _ => TabKind::Normal,
     };
     // Private and Tor windows don't save anything back.
-    store::READ_ONLY.store(window_kind != TabKind::Normal, Ordering::Relaxed);
+    // (A no-hardware-acceleration window is a second Goatr process: it reads your settings and
+    // bookmarks but leaves saving them to the main window.)
+    store::READ_ONLY.store(window_kind != TabKind::Normal || store::no_gpu_window(), Ordering::Relaxed);
     let store = Store::load();
     let settings_now = store.data.settings.clone();
     let st = store.data.settings.clone();
@@ -353,15 +453,23 @@ fn main() -> eframe::Result<()> {
         .with_title(match (window_kind, launch.profile.as_str()) {
             (TabKind::Private, _) => "Goatr — Private window".to_string(),
             (TabKind::Tor, _) => "Goatr — Tor window".to_string(),
+            (_, "") if store::no_gpu_window() => "Goatr — No hardware acceleration".to_string(),
             (_, "") => "Goatr".to_string(),
             (_, p) => format!("Goatr — {p}"),
         })
         .with_app_id("goatr")
         .with_decorations(false)
+        // The GPU surface format is picked from this window, and pop-ups need one with
+        // transparency to be see-through. Goatr paints its own background, so this looks the same.
+        .with_transparent(true)
         .with_inner_size([1300.0, 860.0])
         .with_min_inner_size([520.0, 320.0])
         .with_icon(app_icon());
-    let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
+    // Windows: no per-window vsync. With it, every open pop-up window waited for its own screen
+    // refresh, halving the frame rate while a menu animated. Frames are paced once instead, by
+    // DwmFlush at the start of each frame (Windows composes windows, so there's no tearing).
+    let mut options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
+    options.glow_options.vsync = !cfg!(windows);
 
     let result = eframe::run_native(
         "Goatr",
@@ -426,6 +534,15 @@ fn main() -> eframe::Result<()> {
                 pending_app: None,
                 addr_refocus: false,
                 zoom_bubble_until: 0.0,
+                page_menu: None,
+                tor_circuit: Default::default(),
+                profile_badge: None,
+                choosing_profile: false,
+                frame_stats: (std::time::Instant::now(), 0, 0.0, 0.0),
+                refresh_hz: 0,
+                profile_always: false,
+                #[cfg(windows)]
+                relay: None,
                 last_cpu: 0.0,
                 cpu_dirty: false,
                 cos_tx: {
@@ -438,7 +555,7 @@ fn main() -> eframe::Result<()> {
                     jt
                 },
                 ctx,
-                ctxs: Contexts { normal: WebContext::new(Some(store::profile_dir().join("profile"))), private: None, tor: None, proto: [false; 3], args: [None, None, None] },
+                ctxs: Contexts { normal: WebContext::new(Some(store::engine_dir())), private: None, tor: None, proto: [false; 3], args: [None, None, None] },
                 tabs: Vec::new(),
                 active: 0,
                 next_id: 1,
@@ -465,6 +582,8 @@ fn main() -> eframe::Result<()> {
                 popup: None,
                 popup_had_focus: false,
                 popup_born: 0.0,
+                popup_vis_frames: 0,
+                clear: [0.06, 0.07, 0.08, 1.0],
                 toast: None,
                 fullscreen: false,
                 content_rect: Rect::from_min_size(Pos2::new(0.0, 114.0), Vec2::new(1300.0, 746.0)),
@@ -479,10 +598,20 @@ fn main() -> eframe::Result<()> {
                 (None, TabKind::Tor) => format!("{INTERNAL_BASE}/tor"),
                 (None, TabKind::Normal) => app.home_url(),
             });
-            // First tab: the window handle is available now.
-            let url = app.start_url.take().unwrap();
-            if let Err(e) = app.open_tab(cc, &url, window_kind) {
-                eprintln!("couldn't create the first tab: {e}");
+            // More than one profile and no "always open": ask which one first.
+            let ask = window_kind == TabKind::Normal
+                && store::launch().window.is_empty()
+                && store::launch().profile.is_empty()
+                && store::profiles().len() > 1
+                && store::startup_profile().is_none();
+            if ask {
+                app.choosing_profile = true;
+            } else {
+                // First tab: the window handle is available now.
+                let url = app.start_url.take().unwrap();
+                if let Err(e) = app.open_tab(cc, &url, window_kind) {
+                    eprintln!("couldn't create the first tab: {e}");
+                }
             }
             Ok(Box::new(app))
         }),
@@ -506,15 +635,25 @@ fn app_icon() -> egui::IconData {
 /// Settings shared by every webview. On Windows, webviews sharing a profile must register the
 /// same custom protocols, so the goatr:// handler is on all of them.
 fn common<'a>(b: WebViewBuilder<'a>, sh: &Arc<Shared>, kind: TabKind, register_proto: bool, args: &str) -> WebViewBuilder<'a> {
+    // Before a page paints, show the theme's background instead of a white flash.
+    let bg = {
+        let st = sh.store.lock().unwrap();
+        themes::get(&st.data.settings.theme, sh.system_dark.load(Ordering::Relaxed)).palette(false).bg
+    };
+    let b = b.with_background_color((bg.r(), bg.g(), bg.b(), 255));
     let s = sh.clone();
     let tor = kind == TabKind::Tor;
     #[cfg(windows)]
     let b = {
         use wry::WebViewBuilderExtWindows;
         let b = b.with_additional_browser_args(args);
-        if tor || kind == TabKind::Private {
-            // Private and Tor profiles: no extensions (like Goat).
+        if tor {
+            // Tor: never any extensions (they could reveal who you are).
             b
+        } else if kind == TabKind::Private {
+            // Private: only the extensions you allowed there (added after the first tab opens).
+            let allowed = !s.store.lock().unwrap().data.settings.private_extensions.is_empty();
+            b.with_browser_extensions_enabled(allowed)
         } else {
             // Extensions are loaded once, with the first window's webview. Passing the folder again
             // makes WebView2 reload every extension, which kills their pop-ups and the scripts
@@ -545,6 +684,14 @@ fn common<'a>(b: WebViewBuilder<'a>, sh: &Arc<Shared>, kind: TabKind, register_p
 }
 
 pub const EXT_POPUP_ID: u32 = u32::MAX;
+
+#[derive(Clone, Debug, Default)]
+pub struct TorCircuitView {
+    pub host: String,
+    pub loading: bool,
+    pub hops: Vec<tor::Hop>,
+    pub error: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct PendingApp {
@@ -731,7 +878,7 @@ impl App {
         let settings = self.settings();
         if self.ctxs.args[slot].is_none() && kind != TabKind::Tor {
             // Before this profile's engine starts: encrypted DNS setting.
-            let dir = store::profile_dir().join(if kind == TabKind::Private { "profile-private" } else { "profile" });
+            let dir = if kind == TabKind::Private { store::private_dir() } else { store::engine_dir() };
             privacy::write_dns_prefs(&dir, &settings);
         }
         let args = self.ctxs.args[slot]
@@ -742,7 +889,7 @@ impl App {
                 self.sh.tor.start(self.sh.tor_notifier());
                 self.ctxs.tor.get_or_insert_with(|| WebContext::new(Some(store::profile_dir().join("profile-tor"))))
             }
-            TabKind::Private => self.ctxs.private.get_or_insert_with(|| WebContext::new(Some(store::profile_dir().join("profile-private")))),
+            TabKind::Private => self.ctxs.private.get_or_insert_with(|| WebContext::new(Some(store::private_dir()))),
             TabKind::Normal => &mut self.ctxs.normal,
         };
 
@@ -753,6 +900,8 @@ impl App {
             .with_url(url)
             .with_initialization_script(INJECT_JS)
             .with_initialization_script(&privacy::page_script(&settings))
+            .with_initialization_script(VOLUME_JS)
+            .with_initialization_script(if settings.adblock { YOUTUBE_JS } else { "" })
             .with_ipc_handler(move |req: Request<String>| {
                 let _g = crashlog::Scope::new("page message");
                 if let Ok(m) = serde_json::from_str::<ContentMsg>(req.body()) {
@@ -782,6 +931,15 @@ impl App {
             })
             .with_navigation_handler(move |url| {
                 let _g = crashlog::Scope::new("navigation check");
+                // edge://… and chrome://… pages (e.g. an extension's "Manage" link): Goatr's own page.
+                let lower = url.to_lowercase();
+                if lower.starts_with("edge://") || lower.starts_with("chrome://") {
+                    if let Some(u) = pages::browser_page(&url) {
+                        let _ = t_nav.send(Ev::Redirect(id, u));
+                        c_nav.request_repaint();
+                        return false;
+                    }
+                }
                 if webview_handles(&url) {
                     // HTTPS-only and tracking-link cleaning: load the fixed address instead.
                     if url.starts_with("http") && !url.starts_with(INTERNAL_BASE) {
@@ -828,6 +986,8 @@ impl App {
                 let _ = t_dl2.send(Ev::DownloadDone(url, path.map(|p| p.display().to_string()), ok));
                 c_dl2.request_repaint();
             })
+            // Hidden until its first page has drawn: a brand-new web view flashes white first.
+            .with_visible(false)
             .build_as_child(window)?;
 
         crashlog::debug(format!("open tab {id} {kind:?} adblock enabled={} ready={} rules={}", self.sh.adblock.enabled(), self.sh.adblock.ready(), self.sh.adblock.domain_count()));
@@ -842,10 +1002,37 @@ impl App {
                 });
             }
             winhooks::set_tracking_prevention(&webview, settings.block_third_party_cookies);
+            winhooks::watch_load_errors(&webview);
             {
                 let (tx, c) = (self.tx.clone(), self.ctx.clone());
                 winhooks::watch_external_links(&webview, move |uri, origin| {
                     let _ = tx.send(Ev::AppLink(uri, origin));
+                    c.request_repaint();
+                });
+            }
+            // Private window: the extensions you allowed there (once, with its first tab).
+            if kind == TabKind::Private {
+                static PRIVATE_EXTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !PRIVATE_EXTS.swap(true, Ordering::SeqCst) {
+                    for folder in settings.private_extensions.clone() {
+                        let dir = extinstall::ext_dir().join(&folder);
+                        if dir.is_dir() {
+                            winhooks::add_extension(&webview, &dir, move |r| crashlog::debug(format!("private window extension {folder}: {r:?}")));
+                        }
+                    }
+                }
+            }
+            {
+                let (tx, c) = (self.tx.clone(), self.ctx.clone());
+                {
+                    let (tx, c) = (tx.clone(), c.clone());
+                    winhooks::watch_audio(&webview, move |playing| {
+                        let _ = tx.send(Ev::Audio(id, playing));
+                        c.request_repaint();
+                    });
+                }
+                winhooks::watch_context_menu(&webview, move |m| {
+                    let _ = tx.send(Ev::PageMenu(id, m));
                     c.request_repaint();
                 });
             }
@@ -877,6 +1064,9 @@ impl App {
             cos: Default::default(),
             hidden_since: None,
             low_mem: false,
+            volume: 1.0,
+            painted: false,
+            playing: false,
             born: now(&self.ctx),
         });
         self.active = self.tabs.len() - 1;
@@ -893,7 +1083,7 @@ impl App {
         }
         self.active = idx;
         for (i, t) in self.tabs.iter().enumerate() {
-            let _ = t.webview.set_visible(i == idx);
+            let _ = t.webview.set_visible(i == idx && t.painted);
         }
         let _ = self.tabs[idx].webview.focus();
         self.addr_editing = false;
@@ -1019,6 +1209,7 @@ impl App {
             Ok(_) => self.toast(match window {
                 Some("private") => "Opening a private window…".to_string(),
                 Some("tor") => "Opening a Tor window…".to_string(),
+                Some("nogpu") => "Opening a window without hardware acceleration…".to_string(),
                 _ => format!("Opening {}…", if prof.is_empty() { "the default profile".to_string() } else { format!("profile “{prof}”") }),
             }),
             Err(e) => self.toast(format!("Couldn't open window: {e}")),
@@ -1057,7 +1248,7 @@ impl App {
 
     fn handle_ev(&mut self, ev: Ev, frame: &eframe::Frame, cmds: &mut Vec<Cmd>) {
         match &ev {
-            Ev::Blocked(_) | Ev::Eval(..) | Ev::ExtIds(_) | Ev::AppLink(..) | Ev::ExtLoaded(..) | Ev::Content(_, ContentMsg::Cosmetic { .. }) => {}
+            Ev::Blocked(_) | Ev::Eval(..) | Ev::ExtIds(_) | Ev::AppLink(..) | Ev::PageMenu(..) | Ev::Audio(..) | Ev::ExtLoaded(..) | Ev::Content(_, ContentMsg::Cosmetic { .. }) => {}
             e => crashlog::note(format!("{:.160}", format!("{e:?}"))),
         }
         match ev {
@@ -1091,6 +1282,31 @@ impl App {
                     self.toast(format!("This extension couldn't start: {e}"));
                 }
             },
+            Ev::Audio(id, playing) => {
+                if let Some(i) = self.tab_index(id) {
+                    self.tabs[i].playing = playing;
+                    // Media that just started gets the tab's volume.
+                    let v = self.tabs[i].volume;
+                    if playing && (v - 1.0).abs() > 0.001 {
+                        let _ = self.tabs[i].webview.evaluate_script(&format!("window.__goatrVolume&&__goatrVolume({v})"));
+                    }
+                }
+            }
+            Ev::PageMenu(_id, m) => {
+                crashlog::debug(format!("page menu: link={} src={} sel={} edit={} items={:?}", !m.link.is_empty(), !m.src.is_empty(), !m.selection.is_empty(), m.editable, m.native.iter().map(|n| n.0.as_str()).collect::<Vec<_>>()));
+                #[cfg(windows)]
+                let at = winhooks::cursor_pos().map(|(x, y)| {
+                    let ppp = self.ctx.pixels_per_point();
+                    egui::pos2(x / ppp, y / ppp)
+                });
+                #[cfg(not(windows))]
+                let at: Option<egui::Pos2> = None;
+                let at = at.unwrap_or_else(|| chrome::to_screen(&self.ctx, self.content_rect.center()));
+                self.page_menu = Some(m);
+                self.popup = Some((Popup::PageMenu, at));
+                self.popup_had_focus = false;
+                self.popup_born = now(&self.ctx);
+            }
             Ev::AppLink(url, page) => {
                 let scheme = app_link_scheme(&url);
                 let site = privacy::site_of(&store::host_of(&page));
@@ -1148,6 +1364,7 @@ impl App {
                 });
             }
             Ev::Title(id, title) => {
+                self.show_painted(id);
                 if let Some(i) = self.tab_index(id) {
                     let t = &mut self.tabs[i];
                     t.title = if title.trim().is_empty() { display_url(&t.url) } else { title };
@@ -1161,6 +1378,24 @@ impl App {
                 }
             }
             Ev::Load(id, done, url) => {
+                if done {
+                    self.show_painted(id);
+                }
+                // Goatr's own pages get the theme colour behind them (no white flash);
+                // websites get white, like every browser, for pages with no background of their own.
+                if done {
+                    if let Some(i) = self.tab_index(id) {
+                        let v = self.tabs[i].volume;
+                        if (v - 1.0).abs() > 0.001 {
+                            let _ = self.tabs[i].webview.evaluate_script(&format!("window.__goatrVolume&&__goatrVolume({v})"));
+                        }
+                    }
+                }
+                let internal = url.starts_with(INTERNAL_BASE) || url.is_empty() || url.starts_with("about:");
+                let bg = if internal { self.palette().bg } else { egui::Color32::WHITE };
+                if let Some(i) = self.tab_index(id) {
+                    let _ = self.tabs[i].webview.set_background_color((bg.r(), bg.g(), bg.b(), 255));
+                }
                 if let Some(i) = self.tab_index(id) {
                     let t = &mut self.tabs[i];
                     t.loading = !done;
@@ -1252,6 +1487,9 @@ impl App {
                     self.sh.adblock.set_enabled(s.adblock);
                     self.sh.adblock.set_level(Level::parse(&s.adblock_level));
                     self.sh.adblock.set_custom(&s.adblock_custom);
+                    // "Audio for streaming" switched in Settings.
+                    self.apply_discord_audio();
+                    self.refresh_profile_badge();
                     self.sh.adblock.set_allowlist(&s.adblock_allow);
                 }
                 Notice::ClearBrowsingData => {
@@ -1335,6 +1573,7 @@ impl App {
                 if let Err(e) = self.open_tab(frame, &url, self.window_kind) { self.toast(format!("Couldn't open tab: {e}")); }
             }
             // Private and Tor browsing get their own window (a new tab if you're already in one).
+            Cmd::NewNoGpuWindow => self.spawn_window(Some("nogpu"), None, None),
             Cmd::NewPrivateTab => {
                 if self.window_kind == TabKind::Private {
                     if let Err(e) = self.open_tab(frame, &format!("{INTERNAL_BASE}/newtab?private=1"), TabKind::Private) { self.toast(format!("Couldn't open tab: {e}")); }
@@ -1384,6 +1623,70 @@ impl App {
                     }
                 }
             }
+            Cmd::PageNative(cmd) => {
+                self.page_menu = None;
+                #[cfg(windows)]
+                winhooks::finish_context_menu(Some(cmd));
+                let _ = cmd;
+            }
+            Cmd::CopyText(t) => self.ctx.copy_text(t),
+            Cmd::ShowTorCircuit(at) => {
+                if matches!(self.popup, Some((Popup::TorCircuit, _))) {
+                    self.popup = None;
+                } else {
+                    // Goatr's own pages (like the Tor start page) don't go through Tor: no circuit.
+                    let host = self
+                        .active_tab()
+                        .filter(|t| t.url.starts_with("http") && !t.url.starts_with(INTERNAL_BASE) && !t.url.contains("goatr.localhost"))
+                        .map(|t| store::host_of(&t.url))
+                        .unwrap_or_default();
+                    *self.tor_circuit.lock().unwrap() = TorCircuitView { host: host.clone(), loading: true, ..Default::default() };
+                    let (view, tor, c) = (self.tor_circuit.clone(), self.sh.tor.clone(), self.ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = if host.is_empty() { Err("This is one of Goatr's own pages, which don't go through Tor. Open a website in this tab to see the relays it uses.".to_string()) } else { tor.circuit_for(&host) };
+                        let mut v = view.lock().unwrap();
+                        v.loading = false;
+                        match r {
+                            Ok(h) => v.hops = h,
+                            Err(e) => v.error = e,
+                        }
+                        drop(v);
+                        c.request_repaint();
+                    });
+                    self.popup = Some((Popup::TorCircuit, at));
+                    self.popup_had_focus = false;
+                    self.popup_born = now(&self.ctx);
+                }
+            }
+            Cmd::NewTorCircuit => {
+                self.popup = None;
+                match self.sh.tor.new_circuits() {
+                    Ok(()) => {
+                        self.toast("New Tor circuits: reloading through different relays");
+                        if let Some(t) = self.active_tab() {
+                            let _ = t.webview.reload();
+                        }
+                    }
+                    Err(e) => self.toast(format!("Couldn't get new circuits: {e}")),
+                }
+            }
+            Cmd::ToggleDiscordAudio => {
+                let on = !self.settings().discord_audio;
+                self.mutate_settings(|s| s.discord_audio = on);
+                self.apply_discord_audio();
+                self.toast(if on {
+                    "Page sound now plays from Goatr, so streaming apps can pick it up (experimental)"
+                } else {
+                    "Audio for streaming is off"
+                });
+            }
+            Cmd::SetVolume(v) => {
+                if let Some(t) = self.tabs.get_mut(self.active) {
+                    t.volume = v.clamp(0.0, 6.0);
+                    let _ = t.webview.evaluate_script(&format!("window.__goatrVolume&&__goatrVolume({})", t.volume));
+                }
+            }
+            Cmd::OpenPrivate(url) => self.spawn_window(Some("private"), None, Some(&url)),
             Cmd::ForgetSuggestion(url) => {
                 {
                     let mut s = self.sh.store.lock().unwrap();
@@ -1757,7 +2060,11 @@ impl App {
                         return false;
                     }
                     // A website opens as a tab instead; the browser's own new-tab page just closes the pop-up.
-                    if l.starts_with("http") {
+                    if l.starts_with("edge://") || l.starts_with("chrome://") {
+                        if let Some(u) = pages::browser_page(&url) {
+                            let _ = tx.send(Ev::NewTab(u, TabKind::Normal));
+                        }
+                    } else if l.starts_with("http") {
                         let _ = tx.send(Ev::NewTab(url, TabKind::Normal));
                     }
                     let _ = tx.send(Ev::Content(EXT_POPUP_ID, ContentMsg::Key { action: "escape".into() }));
@@ -1781,13 +2088,74 @@ impl App {
     }
 
     /// Every few seconds: memory saver for background tabs, CPU cores/priority for new page processes.
+    /// A tab's first page has drawn: show its web view (if it's the active tab).
+    fn show_painted(&mut self, id: u32) {
+        if let Some(i) = self.tab_index(id) {
+            if !self.tabs[i].painted {
+                self.tabs[i].painted = true;
+                if i == self.active {
+                    let _ = self.tabs[i].webview.set_visible(true);
+                }
+            }
+        }
+    }
+
+    fn refresh_profile_badge(&mut self) {
+        self.profile_badge = if store::profiles().len() > 1 {
+            let (glyph, color) = store::profile_logo(&store::launch().profile);
+            let c = egui::Color32::from_hex(&color).unwrap_or(egui::Color32::from_rgb(0x5f, 0xd3, 0xb3));
+            Some((glyph, c))
+        } else {
+            None
+        };
+    }
+
+    /// Start or stop the Discord audio relay to match the setting.
+    fn apply_discord_audio(&mut self) {
+        #[cfg(windows)]
+        {
+            let want = self.settings().discord_audio && !self.tabs.is_empty();
+            // The helper stopped by itself (crashed): give up and say so, rather than restart it.
+            if let Some(r) = self.relay.as_mut() {
+                if !r.alive() {
+                    self.relay = None;
+                    self.mutate_settings(|s| s.discord_audio = false);
+                    self.toast("Audio for streaming stopped working and was turned off");
+                    return;
+                }
+            }
+            if want && self.relay.is_none() {
+                if let Some(pid) = self.tabs.first().and_then(|t| winhooks::browser_pid(&t.webview)) {
+                    self.relay = audiorelay::Relay::start(pid);
+                }
+            } else if !want {
+                if let Some(r) = self.relay.take() {
+                    r.stop();
+                }
+            }
+        }
+    }
+
     fn housekeeping(&mut self, ctx: &egui::Context) {
         let t = now(ctx);
         if t - self.last_housekeeping < 5.0 {
             return;
         }
+        self.apply_discord_audio();
         let first = self.last_housekeeping == 0.0;
         self.last_housekeeping = t;
+        #[cfg(windows)]
+        {
+            let hwnd = panels::MAIN_HWND.load(Ordering::Relaxed);
+            if hwnd != 0 {
+                let hz = winhooks::monitor_refresh(hwnd).unwrap_or(0);
+                if hz != self.refresh_hz {
+                    crashlog::debug(format!("screen refresh rate: {hz} Hz"));
+                    self.refresh_hz = hz;
+                }
+            }
+        }
+        self.refresh_profile_badge();
         let st = self.settings();
         #[cfg(windows)]
         if t - self.last_ext_query > 10.0 || (self.ext_ids.is_empty() && t - self.last_ext_query > 2.0) {
@@ -1918,15 +2286,29 @@ fn key_action(a: &str, tab: u32) -> Option<Cmd> {
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        self.clear
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // One wait for the next screen refresh per frame (see `vsync` above).
+        #[cfg(windows)]
+        if unsafe { windows::Win32::Graphics::Dwm::DwmFlush() }.is_err() {
+            std::thread::sleep(std::time::Duration::from_millis(4));
+        }
         #[cfg(target_os = "linux")]
         while gtk::events_pending() {
             gtk::main_iteration_do(false);
         }
         let frame_t0 = std::time::Instant::now();
+        // Never leave a tab hidden for long if its page doesn't report drawing.
+        if let Some(t) = self.tabs.get(self.active) {
+            if !t.painted && now(ui.ctx()) - t.born > 1.2 {
+                let id = t.id;
+                self.show_painted(id);
+            } else if !t.painted {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+            }
+        }
         #[cfg(windows)]
         if panels::MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1938,6 +2320,25 @@ impl eframe::App for App {
         }
         crashlog::phase("frame: webview events");
         crashlog::set_hidden(ui.ctx().input(|i| i.viewport().minimized.unwrap_or(false)));
+        if self.choosing_profile {
+            if let Some(choice) = self.draw_profile_picker(ui) {
+                self.choosing_profile = false;
+                if self.profile_always {
+                    store::set_startup_profile(Some(&choice));
+                }
+                let url = self.start_url.take().unwrap_or_else(|| self.home_url());
+                if choice.is_empty() {
+                    if let Err(e) = self.open_tab(frame, &url, self.window_kind) {
+                        self.toast(format!("Couldn't open tab: {e}"));
+                    }
+                } else {
+                    let start = store::launch().url.clone();
+                    self.spawn_window(None, Some(&choice), start.as_deref());
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            return;
+        }
         let mut cmds = Vec::new();
         while let Ok(ev) = self.rx.try_recv() {
             self.handle_ev(ev, frame, &mut cmds);
@@ -1954,6 +2355,12 @@ impl eframe::App for App {
             self.sh.system_dark.store(t == egui::Theme::Dark, Ordering::Relaxed);
         }
 
+        // The page menu closed: let the page carry on (nothing picked from the engine's commands).
+        if self.page_menu.is_some() && !matches!(self.popup, Some((Popup::PageMenu, _))) {
+            self.page_menu = None;
+            #[cfg(windows)]
+            winhooks::finish_context_menu(None);
+        }
         // A press anywhere in Goatr's own UI (address bar included) closes the zoom bubble.
         if matches!(self.popup, Some((Popup::Zoom, _))) && ui.ctx().input(|i| i.pointer.any_pressed()) {
             self.popup = None;
@@ -2009,6 +2416,21 @@ impl eframe::App for App {
         let ft = frame_t0.elapsed();
         if ft.as_millis() > 150 {
             crashlog::debug(format!("slow frame {ft:?}"));
+        }
+        // Every 2 s of continuous drawing (an animation), log how fast frames came.
+        {
+            let ms = ft.as_secs_f32() * 1000.0;
+            let (start, n, sum, max) = &mut self.frame_stats;
+            *n += 1;
+            *sum += ms;
+            *max = max.max(ms);
+            let el = start.elapsed().as_secs_f32();
+            if el >= 2.0 {
+                if *n as f32 / el > 20.0 {
+                    crashlog::debug(format!("frames: {:.0} fps (screen {} Hz), Goatr's work per frame avg {:.1} ms, max {:.1} ms", *n as f32 / el, self.refresh_hz, *sum / *n as f32, *max));
+                }
+                self.frame_stats = (std::time::Instant::now(), 0, 0.0, 0.0);
+            }
         }
         crashlog::phase("between frames (egui painting / window events)");
     }

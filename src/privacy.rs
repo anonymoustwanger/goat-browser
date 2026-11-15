@@ -104,7 +104,7 @@ pub fn browser_args(s: &Settings) -> String {
     }
     // Third-party cookies are handled per request (and by Edge's tracking prevention), not with
     // Chromium's switch: that switch also cut extensions like RoPro off from their own sites.
-    if !s.hardware_accel {
+    if !s.hardware_accel || crate::store::no_gpu_window() {
         args.push("--disable-gpu".into());
         args.push("--disable-gpu-compositing".into());
     }

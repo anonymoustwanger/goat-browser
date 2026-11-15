@@ -17,10 +17,11 @@ use crate::anim;
 use crate::chrome::PV;
 use crate::{now, App, Cmd, Popup, INTERNAL_BASE};
 
-// Pop-ups are opaque windows (Windows 11 gives them native rounded corners and a shadow).
-const PAD_X: f32 = 0.0;
-const PAD_TOP: f32 = 0.0;
-const PAD_BOTTOM: f32 = 0.0;
+// Pop-ups are see-through windows a little bigger than their panel: room for the panel's own
+// shadow and for it to pop slightly past full size when it bounces in.
+const PAD_X: f32 = 16.0;
+const PAD_TOP: f32 = 16.0;
+const PAD_BOTTOM: f32 = 20.0;
 
 /// Goatr's main window, so pop-ups can belong to it.
 pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
@@ -29,12 +30,16 @@ pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::Atomic
 #[cfg(windows)]
 fn round_corners(title: &str) {
     use windows::core::HSTRING;
-    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL};
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND};
     use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, &HSTRING::from(title)) {
-            let pref = DWMWCP_ROUNDSMALL;
+            // Square window: the panel draws its own rounded corners and shadow.
+            let pref = DWMWCP_DONOTROUND;
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const _ as *const _, std::mem::size_of_val(&pref) as u32);
+            // No Windows 11 outline around the (see-through) window: only the panel shows.
+            let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
+            let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR, &none as *const _ as *const _, 4);
             // No Windows open/close animation: it slides the window in from elsewhere.
             let off = windows::core::BOOL(1);
             let _ = DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, &off as *const _ as *const _, std::mem::size_of_val(&off) as u32);
@@ -46,33 +51,19 @@ fn round_corners(title: &str) {
 #[cfg(windows)]
 fn prepare_window(title: &str) {
     use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWLP_HWNDPARENT, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED};
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetWindowLongPtrW, GWLP_HWNDPARENT};
     round_corners(title);
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, &HSTRING::from(title)) {
-            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED.0 as isize);
             // Owned by Goatr's window: stays above Goatr, but not above other apps.
             let owner = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
             if owner != 0 {
                 SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner);
             }
-            let _ = SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), 0, LWA_ALPHA);
         }
     }
 }
 
-#[cfg(windows)]
-fn set_window_alpha(title: &str, opacity: f32) {
-    use windows::core::HSTRING;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetLayeredWindowAttributes, LWA_ALPHA};
-    unsafe {
-        if let Ok(hwnd) = FindWindowW(None, &HSTRING::from(title)) {
-            let a = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-            let _ = SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), a, LWA_ALPHA);
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -122,15 +113,16 @@ fn rows_height(rows: &[Row]) -> f32 {
 
 /// Card background filling the pop-up window.
 fn card(p: &Painter, r: Rect, pal: &Palette) {
-    p.rect_filled(r, 0, pal.bg2);
-    p.rect_stroke(r, if cfg!(windows) { 8 } else { 0 }, Stroke::new(1.0, pal.line), StrokeKind::Inside);
+    paint::shadow(p, r, 12.0, pal.dark);
+    p.rect_filled(r, 12, pal.bg2);
+    p.rect_stroke(r, 12, Stroke::new(1.0, pal.line), StrokeKind::Inside);
 }
 
 /// Goat's toggle switch.
 fn switch(ui: &mut Ui, p: &Painter, rect: Rect, id: Id, on: bool, pal: &Palette, enabled: bool) -> egui::Response {
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let t = anim::tween(ui.ctx(), id.with("t"), if on { 1.0 } else { 0.0 }, 0.2, anim::out_cubic);
-    let knob_t = anim::tween(ui.ctx(), id.with("k"), if on { 1.0 } else { 0.0 }, 0.28, anim::out_expo);
+    let knob_t = anim::tween(ui.ctx(), id.with("k"), if on { 1.0 } else { 0.0 }, 0.32, anim::spring);
     let op = if enabled { 1.0 } else { 0.5 };
     let r = rect.height() / 2.0;
     p.rect_filled(rect, r as u8, alpha(pal.line, op));
@@ -173,7 +165,7 @@ impl App {
         match popup {
             Popup::Menu => {
                 rows = self.menu_rows();
-                card_w = 300.0;
+                card_w = 320.0;
                 card_h = rows_height(&rows);
             }
             Popup::TabMenu(id) => {
@@ -219,6 +211,21 @@ impl App {
                 card_w = self.addr_rect.width();
                 card_h = 8.0 + self.sugg.len() as f32 * 36.0;
             }
+            Popup::PageMenu => {
+                rows = self.page_menu_rows();
+                card_w = 280.0;
+                card_h = rows_height(&rows);
+            }
+            Popup::TorCircuit => {
+                let v = self.tor_circuit.lock().unwrap();
+                let rows = if v.hops.is_empty() { 0 } else { v.hops.len() + 2 };
+                card_w = 330.0;
+                card_h = 16.0 + 24.0 + 8.0 + if rows > 0 { rows as f32 * 38.0 } else { 52.0 } + 12.0 + 34.0 + 16.0;
+            }
+            Popup::Volume => {
+                card_w = 300.0;
+                card_h = 112.0;
+            }
             Popup::Zoom => {
                 card_w = 290.0;
                 card_h = 52.0;
@@ -236,18 +243,19 @@ impl App {
         let win = vec2(card_w + PAD_X * 2.0, card_h + PAD_TOP + PAD_BOTTOM);
         // Right-aligned to the button for toolbar panels; at the pointer for context menus.
         let pos = match popup {
-            Popup::Menu | Popup::Shield | Popup::Extensions | Popup::Zoom => pos2(at.x - win.x, at.y - 4.0),
+            Popup::Menu | Popup::Shield | Popup::Extensions | Popup::Zoom | Popup::Volume | Popup::TorCircuit => pos2(at.x - win.x + PAD_X, at.y - 4.0 - PAD_TOP),
             Popup::Suggest => pos2(at.x - PAD_X, at.y - PAD_TOP),
-            Popup::ExtConfirm | Popup::AppLink => pos2(at.x - win.x / 2.0, at.y + 6.0),
+            Popup::ExtConfirm | Popup::AppLink => pos2(at.x - win.x / 2.0, at.y + 6.0 - PAD_TOP),
             _ => pos2(at.x - PAD_X + 2.0, at.y - PAD_TOP + 2.0),
         };
         // Keep the whole pop-up inside Goatr's window (and the screen).
         let bounds = ctx
             .input(|i| i.viewport().inner_rect)
             .unwrap_or(Rect::from_min_size(Pos2::ZERO, ctx.input(|i| i.viewport().monitor_size).unwrap_or(vec2(1920.0, 1080.0))));
+        // (The see-through padding may hang over the edge; the panel itself stays inside.)
         let pos = pos2(
-            pos.x.min(bounds.right() - win.x - 4.0).max(bounds.left() + 4.0),
-            pos.y.min(bounds.bottom() - win.y - 4.0).max(bounds.top()),
+            pos.x.min(bounds.right() - win.x + PAD_X - 4.0).max(bounds.left() - PAD_X + 4.0),
+            pos.y.min(bounds.bottom() - win.y + PAD_BOTTOM - 4.0).max(bounds.top() - PAD_TOP),
         );
         let name = match popup {
             Popup::Menu => "menu",
@@ -259,6 +267,9 @@ impl App {
             Popup::ExtConfirm => "addext",
             Popup::AppLink => "applink",
             Popup::Zoom => "zoom",
+            Popup::PageMenu => "pagemenu",
+            Popup::Volume => "volume",
+            Popup::TorCircuit => "torcircuit",
         };
         let title = format!("Goatr pop-up {name}");
         let vid = ViewportId::from_hash_of(match popup {
@@ -271,6 +282,9 @@ impl App {
             Popup::ExtConfirm => "addext",
             Popup::AppLink => "applink",
             Popup::Zoom => "zoom",
+            Popup::PageMenu => "pagemenu",
+            Popup::Volume => "volume",
+            Popup::TorCircuit => "torcircuit",
         });
         // A new pop-up is created hidden; once Windows' own show animation is switched off it's
         // shown and fades/grows in from its centre.
@@ -278,23 +292,28 @@ impl App {
             self.popup_ready_for = Some(popup);
             self.popup_ready = !cfg!(windows);
             self.popup_born = t_now;
+            self.popup_vis_frames = 0;
         }
         let ready = self.popup_ready || closing.is_some();
+        // Shown only once it has drawn twice, so it never appears empty or black.
+        let shown = closing.is_some() || (ready && self.popup_vis_frames >= 1);
         let builder = ViewportBuilder::default()
             .with_title(title.clone())
             .with_decorations(false)
-            .with_transparent(false)
+            .with_transparent(true)
             .with_resizable(false)
             .with_taskbar(false)
             .with_active(popup != Popup::Suggest && popup != Popup::Zoom)
             .with_position(pos)
             .with_inner_size(win)
-            .with_visible(ready);
+            .with_visible(shown);
         // Windows keeps pop-ups above Goatr by making Goatr their owner (see prepare_window).
         #[cfg(not(windows))]
         let builder = builder.with_always_on_top();
 
         let mut close = false;
+        // Closed by clicking somewhere else: vanish at once instead of fading.
+        let mut blurred = false;
         #[allow(unused_mut)]
         let mut became_ready = false;
         let born = self.popup_born;
@@ -310,6 +329,9 @@ impl App {
             Popup::ExtConfirm => "pop-up window: add extension",
             Popup::AppLink => "pop-up window: open app",
             Popup::Zoom => "pop-up window: zoom",
+            Popup::PageMenu => "pop-up window: page menu",
+            Popup::Volume => "pop-up window: volume",
+            Popup::TorCircuit => "pop-up window: tor circuit",
         });
         ctx.show_viewport_immediate(vid, builder, |ui, _class| {
             let pctx = ui.ctx().clone();
@@ -332,9 +354,15 @@ impl App {
                 match pctx.input(|i| i.viewport().focused) {
                     Some(true) => self.popup_had_focus = true,
                     // "Add extension?" stays until you answer.
-                    Some(false) if self.popup_had_focus && popup != Popup::ExtConfirm && popup != Popup::AppLink => close = true,
+                    Some(false) if self.popup_had_focus && popup != Popup::ExtConfirm && popup != Popup::AppLink => {
+                        close = true;
+                        blurred = true;
+                    }
                     _ => {}
                 }
+                // A click into the page or another app only reaches this pop-up's window, and
+                // pop-ups are drawn with Goatr's window: keep that drawing so it notices at once.
+                pctx.request_repaint_after_for(std::time::Duration::from_millis(30), egui::ViewportId::ROOT);
                 // If the window never got focus (e.g. the click went elsewhere), don't linger.
                 if !self.popup_had_focus && now(&pctx) - born > 1.5 {
                     pctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -355,49 +383,55 @@ impl App {
                 became_ready = true;
                 pctx.request_repaint();
             }
-            // Fade in while growing from 96% around its centre; quick fade-out on close.
+            // Goat's pop: the panel springs from 88% to just past full size and settles, fast.
+            // The window is see-through around the panel, so only the panel is ever visible.
+            let warm = self.popup_vis_frames >= 1;
+            if ready && closing.is_none() {
+                self.popup_vis_frames = self.popup_vis_frames.saturating_add(1);
+                if self.popup_vis_frames == 1 {
+                    self.popup_born = now(&pctx);
+                }
+                if !warm {
+                    pctx.request_repaint();
+                }
+            }
             let (opacity, scale) = match closing {
-                None if anim && ready => {
-                    let k = ((now(&pctx) - born) as f32 / 0.18).clamp(0.0, 1.0);
-                    if k < 1.0 {
+                None if !ready || !warm => (0.0, 0.88),
+                None if anim => {
+                    let t = (now(&pctx) - self.popup_born) as f32;
+                    if t < 0.28 {
                         pctx.request_repaint();
                     }
-                    let e = anim::out_cubic(k);
-                    (e, 0.96 + 0.04 * e)
+                    ((t / 0.05).clamp(0.0, 1.0), anim::pop(t, 0.88))
                 }
-                None if !ready => (0.0, 0.96),
                 Some(t0) => {
-                    let k = ((now(&pctx) - t0) as f32 / 0.08).clamp(0.0, 1.0);
+                    let k = ((now(&pctx) - t0) as f32 / 0.09).clamp(0.0, 1.0);
                     pctx.request_repaint();
-                    let e = anim::in_cubic(k);
-                    (1.0 - e, 1.0 - 0.02 * e)
+                    (1.0 - anim::in_cubic(k), 1.0 - 0.06 * anim::in_cubic(k))
                 }
                 None => (1.0, 1.0),
             };
-            // The whole window fades (Windows), so the panel appears in place, not from outside.
-            #[cfg(windows)]
-            set_window_alpha(&title, opacity);
-            let frame_r = Rect::from_min_size(full.min, vec2(card_w, card_h));
+            let frame_r = Rect::from_min_size(full.min + vec2(PAD_X, PAD_TOP), vec2(card_w, card_h));
             let card_r = frame_r;
             // Contents grow from the centre on their own layer (only this pop-up's layer).
             let layer = egui::LayerId::new(egui::Order::Foreground, Id::new(("popup-content", name)));
             let c = frame_r.center().to_vec2();
             pctx.set_transform_layer(layer, egui::emath::TSTransform::from_translation(c) * egui::emath::TSTransform::from_scaling(scale) * egui::emath::TSTransform::from_translation(-c));
-            let bgp = ui.painter().clone().with_layer_id(layer);
+            let mut bgp = ui.painter().clone().with_layer_id(layer);
+            bgp.set_opacity(opacity);
             card(&bgp, frame_r, &pal);
-            let mut p = bgp.with_clip_rect(frame_r);
-            if !cfg!(windows) {
-                p.set_opacity(opacity);
-            }
+            let p = bgp.with_clip_rect(frame_r.shrink(1.0));
             let mut local = Vec::new();
             match popup {
-                Popup::Menu | Popup::TabMenu(_) | Popup::BmMenu(_) => self.draw_rows(ui, &p, card_r, &rows, &pal, &mut local),
+                Popup::Menu | Popup::TabMenu(_) | Popup::BmMenu(_) | Popup::PageMenu => self.draw_rows(ui, &p, card_r, &rows, &pal, &mut local),
                 Popup::Shield => self.draw_shield(ui, &p, card_r, &pal, anim, &mut local),
                 Popup::Extensions => self.draw_extensions(ui, &p, card_r, &pal, &mut local),
                 Popup::Suggest => self.draw_suggest(ui, &p, card_r, &pal, &mut local),
                 Popup::ExtConfirm => self.draw_ext_confirm(ui, &p, card_r, &pal, &mut local),
                 Popup::AppLink => self.draw_app_link(ui, &p, card_r, &pal, &mut local),
                 Popup::Zoom => self.draw_zoom(ui, &p, card_r, &pal, &mut local),
+                Popup::Volume => self.draw_volume(ui, &p, card_r, &pal, &mut local),
+                Popup::TorCircuit => self.draw_tor_circuit(ui, &p, card_r, &pal, &mut local),
             }
             if closing.is_some() {
                 return;
@@ -405,7 +439,8 @@ impl App {
             // Most actions close the panel; the shield's own switches keep it open.
             for c in local {
                 let keep = matches!(c, Cmd::SetAdblock(_) | Cmd::SetLevel(_) | Cmd::ToggleSiteAdblock | Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomReset | Cmd::SetTheme(_))
-                    || popup == Popup::Zoom;
+                    || popup == Popup::Zoom
+                    || popup == Popup::Volume;
                 if !keep {
                     close = true;
                 }
@@ -413,6 +448,7 @@ impl App {
             }
         });
         if became_ready {
+            self.popup_vis_frames = 0;
             self.popup_ready = true;
             self.popup_born = now(ctx);
         }
@@ -424,7 +460,7 @@ impl App {
                 cmds.push(Cmd::AppLinkAnswer(false, false));
             }
             self.popup = None;
-            self.popup_closing = Some((popup, at, t_now));
+            self.popup_closing = if blurred { None } else { Some((popup, at, t_now)) };
             self.popup_closed_at = Some((popup, t_now));
         }
     }
@@ -478,6 +514,207 @@ impl App {
         } else if rc.clicked() || esc {
             cmds.push(Cmd::ExtConfirm(false));
         }
+    }
+
+    /// Goatr's right-click menu for pages: Goat's look, with the engine doing copy/paste/save.
+    fn page_menu_rows(&self) -> Vec<Row> {
+        let Some(m) = self.page_menu.clone() else { return vec![] };
+        let mut rows: Vec<Row> = Vec::new();
+        let native = |rows: &mut Vec<Row>, icon: Icon, label: &str, kbd: &'static str, name: &str| {
+            if let Some((id, enabled)) = m.native(name) {
+                let mut it = item(icon, label, kbd, Cmd::PageNative(id));
+                it.enabled = enabled;
+                rows.push(Row::Item(it));
+            }
+        };
+        let web = |u: &str| u.starts_with("http://") || u.starts_with("https://");
+        if !m.link.is_empty() {
+            rows.push(Row::Item(item(icons::PLUS, "Open link in new tab", "", Cmd::OpenUrl(m.link.clone(), true))));
+            if web(&m.link) {
+                let mut it = item(icons::MASK, "Open link in private window", "", Cmd::OpenPrivate(m.link.clone()));
+                it.kind = Kind::Priv;
+                rows.push(Row::Item(it));
+            }
+            rows.push(Row::Sep);
+            native(&mut rows, icons::DOWNLOAD, "Save link as…", "", "saveLinkAs");
+            rows.push(Row::Item(item(icons::COPY, "Copy link address", "", Cmd::CopyText(m.link.clone()))));
+            rows.push(Row::Sep);
+        }
+        if !m.src.is_empty() && !m.src.starts_with("data:") || m.native("saveImageAs").is_some() {
+            if web(&m.src) {
+                rows.push(Row::Item(item(icons::EXTERNAL, "Open image in new tab", "", Cmd::OpenUrl(m.src.clone(), true))));
+            }
+            native(&mut rows, icons::DOWNLOAD, "Save image as…", "", "saveImageAs");
+            native(&mut rows, icons::COPY, "Copy image", "", "copyImage");
+            if web(&m.src) {
+                rows.push(Row::Item(item(icons::COPY, "Copy image address", "", Cmd::CopyText(m.src.clone()))));
+            }
+            rows.push(Row::Sep);
+        }
+        if m.editable {
+            native(&mut rows, icons::BACK, "Undo", "Ctrl+Z", "undo");
+            native(&mut rows, icons::FORWARD, "Redo", "Ctrl+Y", "redo");
+            rows.push(Row::Sep);
+            native(&mut rows, icons::EDIT, "Cut", "Ctrl+X", "cut");
+            native(&mut rows, icons::COPY, "Copy", "Ctrl+C", "copy");
+            native(&mut rows, icons::DOWN, "Paste", "Ctrl+V", "paste");
+            native(&mut rows, icons::DOWN, "Paste as plain text", "Ctrl+Shift+V", "pasteAndMatchStyle");
+            native(&mut rows, icons::EXPAND, "Select all", "Ctrl+A", "selectAll");
+            rows.push(Row::Sep);
+        } else if !m.selection.trim().is_empty() {
+            if m.native("copy").is_some() {
+                native(&mut rows, icons::COPY, "Copy", "Ctrl+C", "copy");
+            } else {
+                rows.push(Row::Item(item(icons::COPY, "Copy", "Ctrl+C", Cmd::CopyText(m.selection.clone()))));
+            }
+            let q: String = m.selection.split_whitespace().collect::<Vec<_>>().join(" ");
+            let short: String = if q.chars().count() > 24 { q.chars().take(22).collect::<String>() + "…" } else { q.clone() };
+            rows.push(Row::Item(item(icons::SEARCH, &format!("Search the web for “{short}”"), "", Cmd::OpenUrl(crate::pages::resolve_input(&self.settings(), &q), true))));
+            rows.push(Row::Sep);
+        }
+        if m.link.is_empty() && m.src.is_empty() && !m.editable && m.selection.trim().is_empty() {
+            rows.push(Row::Item(item(icons::BACK, "Back", "Alt+←", Cmd::Back)));
+            rows.push(Row::Item(item(icons::FORWARD, "Forward", "Alt+→", Cmd::Forward)));
+            rows.push(Row::Item(item(icons::RELOAD, "Reload", "Ctrl+R", Cmd::Reload)));
+            rows.push(Row::Sep);
+            native(&mut rows, icons::DOWNLOAD, "Save as…", "Ctrl+S", "saveAs");
+            rows.push(Row::Item(item(icons::PRINT, "Print…", "Ctrl+P", Cmd::Print)));
+            native(&mut rows, icons::EXPAND, "Select all", "Ctrl+A", "selectAll");
+            rows.push(Row::Sep);
+        }
+        match m.native("inspectElement") {
+            Some((id, _)) => rows.push(Row::Item(item(icons::SEARCH, "Inspect", "F12", Cmd::PageNative(id)))),
+            None => rows.push(Row::Item(item(icons::SEARCH, "Inspect", "F12", Cmd::Devtools))),
+        }
+        // No double or leading separators.
+        let mut out: Vec<Row> = Vec::new();
+        for r in rows {
+            let sep = matches!(r, Row::Sep);
+            if sep && (out.is_empty() || matches!(out.last(), Some(Row::Sep))) {
+                continue;
+            }
+            out.push(r);
+        }
+        out
+    }
+
+    /// Tor Browser-style circuit: This browser → entry → middle → exit → the site.
+    fn draw_tor_circuit(&mut self, ui: &mut Ui, p: &Painter, card_r: Rect, pal: &Palette, cmds: &mut Vec<Cmd>) {
+        let ctx = ui.ctx().clone();
+        let v = self.tor_circuit.lock().unwrap().clone();
+        let purple = Color32::from_rgb(0xb5, 0x7c, 0xf5);
+        let x0 = card_r.left() + 18.0;
+        let mut y = card_r.top() + 16.0;
+        icons::draw(p, Rect::from_min_size(pos2(x0, y + 3.0), Vec2::splat(16.0)), icons::ONION, purple, 1.4);
+        text_elided(p, pos2(x0 + 24.0, y + 11.0), "Tor circuit for this site", bold(14.0), pal.text, card_r.width() - 60.0, Align2::LEFT_CENTER);
+        y += 24.0 + 8.0;
+        if v.loading || !v.error.is_empty() || v.hops.is_empty() {
+            let msg = if v.loading { "Looking up the relays…".to_string() } else if v.error.is_empty() { "No circuit found.".to_string() } else { v.error.clone() };
+            let g = p.layout(msg, font(12.5), pal.muted, card_r.width() - 36.0);
+            p.galley(pos2(x0, y + 6.0), g, pal.muted);
+            if v.loading {
+                ctx.request_repaint();
+            }
+            y += 52.0;
+        } else {
+            let n = v.hops.len();
+            let mut rows: Vec<(String, String)> = vec![("This browser".into(), String::new())];
+            for (i, h) in v.hops.iter().enumerate() {
+                let role = if i == 0 { "Guard" } else if i + 1 == n { "Exit" } else { "Relay" };
+                rows.push((format!("{}  ·  {role}", crate::tor::country_name(&h.country)), h.ip.clone()));
+            }
+            rows.push((v.host.clone(), String::new()));
+            let dot_x = x0 + 6.0;
+            let first_y = y + 19.0;
+            let last_y = y + 19.0 + (rows.len() - 1) as f32 * 38.0;
+            p.line_segment([pos2(dot_x, first_y), pos2(dot_x, last_y)], Stroke::new(2.0, alpha(purple, 0.5)));
+            for (i, (title, sub)) in rows.iter().enumerate() {
+                let cy = y + 19.0;
+                let end = i == 0 || i + 1 == rows.len();
+                p.circle_filled(pos2(dot_x, cy), if end { 5.0 } else { 4.0 }, if end { pal.text } else { purple });
+                if sub.is_empty() {
+                    text_elided(p, pos2(x0 + 22.0, cy), title, if end { bold(13.0) } else { font(13.0) }, pal.text, card_r.width() - 60.0, Align2::LEFT_CENTER);
+                } else {
+                    text_elided(p, pos2(x0 + 22.0, cy - 8.0), title, font(13.0), pal.text, card_r.width() - 60.0, Align2::LEFT_CENTER);
+                    text_elided(p, pos2(x0 + 22.0, cy + 9.0), sub, font(11.5), pal.muted, card_r.width() - 60.0, Align2::LEFT_CENTER);
+                }
+                y += 38.0;
+            }
+        }
+        y += 12.0;
+        let br = Rect::from_min_max(pos2(x0, y), pos2(card_r.right() - 18.0, y + 34.0));
+        let r = ui.interact(br, Id::new("tor-newcirc"), Sense::click());
+        let h = crate::anim::hover(&ctx, Id::new("tor-newcirc-h"), r.hovered(), 0.12);
+        p.rect_filled(br, 9, mix(alpha(purple, 0.18), alpha(purple, 0.30), h));
+        p.text(br.center(), Align2::CENTER_CENTER, "New circuits (reloads the page)", bold(13.0), pal.text);
+        if r.clicked() {
+            cmds.push(Cmd::NewTorCircuit);
+        }
+    }
+
+    /// The tab's volume: 0–600% slider (snaps to 100%), mute and reset.
+    fn draw_volume(&mut self, ui: &mut Ui, p: &Painter, card_r: Rect, pal: &Palette, cmds: &mut Vec<Cmd>) {
+        let ctx = ui.ctx().clone();
+        let vol = self.active_tab().map(|t| t.volume).unwrap_or(1.0);
+        let x0 = card_r.left() + 16.0;
+        let x1 = card_r.right() - 16.0;
+        let top = card_r.top() + 14.0;
+        p.text(pos2(x0, top + 10.0), Align2::LEFT_CENTER, "Tab volume", font(13.0), pal.muted);
+        p.text(pos2(x1, top + 10.0), Align2::RIGHT_CENTER, format!("{}%", (vol * 100.0).round()), bold(15.0), if vol > 1.0 { pal.accent } else { pal.text });
+        // Slider.
+        let track = Rect::from_min_max(pos2(x0 + 6.0, top + 34.0), pos2(x1 - 6.0, top + 40.0));
+        let hit = track.expand2(vec2(8.0, 12.0));
+        let resp = ui.interact(hit, Id::new("vol-slider"), Sense::click_and_drag());
+        let frac = |v: f32| (v / 6.0).clamp(0.0, 1.0);
+        p.rect_filled(track, 3, pal.bg3);
+        let shown = crate::anim::tween(&ctx, Id::new("vol-shown"), frac(vol), 0.12, crate::anim::out_cubic);
+        let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * shown, track.max.y));
+        if fill.width() > 1.0 {
+            paint::accent_fill(p, fill, 3, pal);
+        }
+        // 100% mark.
+        let mark_x = track.left() + track.width() * frac(1.0);
+        p.line_segment([pos2(mark_x, track.top() - 4.0), pos2(mark_x, track.bottom() + 4.0)], Stroke::new(1.5, pal.muted));
+        let knob = pos2(track.left() + track.width() * shown, track.center().y);
+        let grow = crate::anim::hover(&ctx, Id::new("vol-knob"), resp.hovered() || resp.dragged(), 0.15);
+        p.circle_filled(knob, 7.0 + 2.0 * grow, pal.text);
+        if resp.hovered() || resp.dragged() {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if resp.dragged() || resp.clicked() {
+            if let Some(pt) = resp.interact_pointer_pos() {
+                let mut v = ((pt.x - track.left()) / track.width()).clamp(0.0, 1.0) * 6.0;
+                if (v - 1.0).abs() < 0.12 {
+                    v = 1.0; // snap to 100%
+                }
+                let v = (v * 20.0).round() / 20.0;
+                if (v - vol).abs() > 0.001 {
+                    cmds.push(Cmd::SetVolume(v));
+                }
+            }
+        }
+        // Mute / 100%.
+        let by = top + 60.0;
+        let mut x = x1;
+        let mut btn = |w: f32, key: &str, label: &str, cmd: Cmd| {
+            let r = Rect::from_min_size(pos2(x - w, by), vec2(w, 28.0));
+            x -= w + 6.0;
+            let rr = ui.interact(r, Id::new(("vol-btn", key)), Sense::click());
+            let h = crate::anim::hover(&ctx, Id::new(("vol-btn-h", key)), rr.hovered(), 0.12);
+            p.rect_filled(r, 8, mix(pal.bg2, pal.bg3, h));
+            p.rect_stroke(r, 8, Stroke::new(1.0, pal.line), egui::StrokeKind::Inside);
+            p.text(r.center(), Align2::CENTER_CENTER, label, font(12.5), pal.text);
+            if rr.clicked() {
+                cmds.push(cmd);
+            }
+        };
+        btn(64.0, "reset", "100%", Cmd::SetVolume(1.0));
+        if vol > 0.001 {
+            btn(64.0, "mute", "Mute", Cmd::SetVolume(0.0));
+        } else {
+            btn(64.0, "unmute", "Unmute", Cmd::SetVolume(1.0));
+        }
+        p.text(pos2(x0, by + 14.0), Align2::LEFT_CENTER, "Up to 600%", font(11.5), pal.muted);
     }
 
     /// Chrome-style zoom bubble: "Zoom: 125%  [−] [+]  Reset".
@@ -591,6 +828,7 @@ impl App {
             Row::Item(item(icons::PLUS, "New tab", "Ctrl+T", Cmd::NewTab)),
             Row::Item(private),
             Row::Item(tor),
+            Row::Item(item(icons::WIN_MAX, "New window without GPU", "", Cmd::NewNoGpuWindow)),
             Row::Sep,
             Row::Item(item(icons::CLOCK, "History", "Ctrl+H", Cmd::OpenPage("history"))),
             Row::Item(bm),
@@ -643,11 +881,27 @@ impl App {
                         _ if hov => pal.accent,
                         _ => pal.muted,
                     };
-                    let ir = Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0));
+                    // Lay the label out at every size the hover bounce uses before it's needed, so
+                    // its letters are already in the font texture (new letters appearing mid-
+                    // animation made a thin line flash on Windows).
+                    for k in 0..4 {
+                        let _ = p.layout_no_wrap(it.label.clone(), font(13.0 + 0.5 * k as f32), text_c);
+                    }
+                    // Hovered row: icon and label grow a little, with a bounce.
+                    let g = crate::anim::tween(&ctx, Id::new(("rowg", i)), if hov { 1.0 } else { 0.0 }, 0.32, crate::anim::ease_bounce);
+                    let ir = Rect::from_center_size(pos2(r.left() + 18.0, r.center().y), Vec2::splat(16.0 * (1.0 + 0.22 * g)));
                     let fill = if let Kind::Check(true) = it.kind { Some(alpha(pal.accent, 0.25)) } else { None };
                     icons::draw_filled(p, ir, it.icon, icon_c, 1.5, fill);
                     let kbd_w = if it.kbd.is_empty() { 0.0 } else { text_width(ui, it.kbd, font(11.5)) + 12.0 };
-                    text_elided(p, pos2(ir.right() + 10.0, r.center().y), &it.label, font(13.0), text_c, r.width() - 46.0 - kbd_w, Align2::LEFT_CENTER);
+                    // Grow the label only if it fits at full size; long labels stay put (eliding
+                    // them mid-animation made them flicker).
+                    let budget = r.width() - 50.0 - kbd_w;
+                    let tx = pos2(r.left() + 36.0 + 3.0 * g, r.center().y);
+                    if text_width(ui, &it.label, font(14.5)) <= budget {
+                        p.text(tx, Align2::LEFT_CENTER, &it.label, font(((13.0 * (1.0 + 0.1 * g)) * 2.0).round() / 2.0), text_c);
+                    } else {
+                        text_elided(p, tx, &it.label, font(13.0), text_c, budget, Align2::LEFT_CENTER);
+                    }
                     if !it.kbd.is_empty() {
                         p.text(pos2(r.right() - 10.0, r.center().y), Align2::RIGHT_CENTER, it.kbd, font(11.5), pal.muted);
                     }
@@ -857,7 +1111,7 @@ impl App {
         let inner = seg.shrink(3.0);
         let bw = inner.width() / 3.0;
         let idx = level as usize as f32;
-        let ti = anim::tween(&ctx, Id::new("ab-thumb"), idx, 0.34, anim::out_expo);
+        let ti = anim::tween(&ctx, Id::new("ab-thumb"), idx, 0.38, anim::spring);
         let thumb = Rect::from_min_size(pos2(inner.left() + bw * ti, inner.top()), vec2(bw, inner.height()));
         paint::shadow(&segp, thumb.shrink(3.0), 7.0, pal.dark);
         paint::accent_fill(&segp, thumb, 7, pal);

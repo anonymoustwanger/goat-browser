@@ -79,3 +79,21 @@ pub fn test_shared() -> Arc<Shared> {
         ext_sites: Default::default(),
     })
 }
+
+/// What was right-clicked in a page, for Goatr's own context menu.
+#[derive(Debug, Clone, Default)]
+pub struct PageMenu {
+    pub link: String,
+    pub src: String,
+    pub selection: String,
+    pub editable: bool,
+    /// The engine's own commands: (name, label, command id, enabled).
+    pub native: Vec<(String, String, i32, bool)>,
+}
+
+impl PageMenu {
+    /// The engine's command with this name, if it offered one (and whether it's enabled).
+    pub fn native(&self, name: &str) -> Option<(i32, bool)> {
+        self.native.iter().find(|n| n.0 == name).map(|n| (n.2, n.3))
+    }
+}
