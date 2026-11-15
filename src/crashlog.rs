@@ -26,9 +26,13 @@ pub fn debug(s: impl Into<String>) {
         let _ = std::thread::Builder::new().name("debug-log".into()).spawn(move || {
             let dir = app_dir().join("data");
             let _ = std::fs::create_dir_all(&dir);
-            let path = dir.join("debug.log");
-            // Start fresh each run (keep the previous run as debug-prev.log).
-            let _ = std::fs::rename(&path, dir.join("debug-prev.log"));
+            // Extra Goat processes (other windows, the standby window) get their own log, so they
+            // don't wipe the main window's.
+            let main = !std::env::args().any(|a| a == "--new-window" || a.starts_with("--window"));
+            let (name, prev) = if main { ("debug.log", "debug-prev.log") } else { ("debug-window.log", "debug-window-prev.log") };
+            let path = dir.join(name);
+            // Start fresh each run (keep the previous run).
+            let _ = std::fs::rename(&path, dir.join(prev));
             let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else { return };
             while let Ok(l) = rx.recv() {
                 let _ = writeln!(f, "{l}");

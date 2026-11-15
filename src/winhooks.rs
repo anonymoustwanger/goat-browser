@@ -738,13 +738,33 @@ pub fn watch_favicon(webview: &wry::WebView, on_png: impl Fn(Vec<u8>) + Clone + 
 
 /// Show a (hidden) top-level window of this process by its title at (x, y, w, h) physical
 /// pixels and bring it to the front. Works from any thread.
-pub fn show_window_by_title(title: &str, r: [f32; 4]) {
+pub fn show_window_by_title(title: &str, r: [f32; 4]) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_SHOWWINDOW, SW_SHOW};
     unsafe {
+        match FindWindowW(None, &HSTRING::from(title)) {
+            Ok(h) if !h.is_invalid() => {
+                // Back on the taskbar like any Goat window.
+                use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+                let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+                SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & !(WS_EX_TOOLWINDOW.0 as isize)) | WS_EX_APPWINDOW.0 as isize);
+                let _ = SetWindowPos(h, Some(HWND_TOP), r[0] as i32, r[1] as i32, r[2] as i32, r[3] as i32, SWP_SHOWWINDOW);
+                let _ = ShowWindow(h, SW_SHOW);
+                let _ = SetForegroundWindow(h);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Hide a top-level window of this process by its title (the standby window).
+pub fn hide_window_by_title(title: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindowVisible, ShowWindow, SW_HIDE};
+    unsafe {
         if let Ok(h) = FindWindowW(None, &HSTRING::from(title)) {
-            let _ = SetWindowPos(h, Some(HWND_TOP), r[0] as i32, r[1] as i32, r[2] as i32, r[3] as i32, SWP_SHOWWINDOW);
-            let _ = ShowWindow(h, SW_SHOW);
-            let _ = SetForegroundWindow(h);
+            if !h.is_invalid() && IsWindowVisible(h).as_bool() {
+                let _ = ShowWindow(h, SW_HIDE);
+            }
         }
     }
 }

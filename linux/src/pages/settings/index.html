@@ -21,7 +21,6 @@
     <a href="#adblock">Ad blocker</a>
     <a href="#cookies">Cookies</a>
     <a href="#tor">Tor</a>
-    <a href="#proxy">Proxy</a>
     <a href="#data">Clear data</a>
     <a href="#about">About</a>
   </nav>
@@ -73,6 +72,37 @@
             <span class="dnsbtns"><button type="button" id="dnstest">Test again</button><button type="button" id="dnscheck" hidden>Open check page</button></span>
           </div>
         </div>
+        <div class="row col" id="proxy">
+          <span><b>Proxy</b><small>How Goat connects to the internet. Tor tabs always use Tor.</small></span>
+        </div>
+        <div class="row col">
+          <div class="radios">
+            <label><input type="radio" name="pmode" value="system" data-proxy="mode"> <span><b>Use system proxy</b><small>Follows your system proxy settings.</small></span></label>
+            <label><input type="radio" name="pmode" value="direct" data-proxy="mode"> <span><b>No proxy</b><small>Connect directly.</small></span></label>
+            <label><input type="radio" name="pmode" value="manual" data-proxy="mode"> <span><b>Manual</b><small>HTTP, HTTPS, SOCKS4 or SOCKS5 server.</small></span></label>
+            <label><input type="radio" name="pmode" value="pac" data-proxy="mode"> <span><b>Auto-config (PAC) URL</b></span></label>
+          </div>
+        </div>
+        <div class="grid" id="manualfields">
+          <label>Type
+            <select data-proxy="type">
+              <option value="socks5">SOCKS5</option>
+              <option value="socks4">SOCKS4</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+          </label>
+          <label>Host <input data-proxy="host" placeholder="127.0.0.1" spellcheck="false"></label>
+          <label>Port <input data-proxy="port" placeholder="1080" inputmode="numeric"></label>
+          <label>Username <input data-proxy="username" placeholder="optional" spellcheck="false" autocomplete="off"></label>
+          <label>Password <input data-proxy="password" type="password" placeholder="optional" autocomplete="new-password"></label>
+          <label class="wide">Bypass list <input data-proxy="bypass" placeholder="<local>, *.example.com" spellcheck="false"></label>
+        </div>
+        <div class="grid" id="pacfields">
+          <label class="wide">PAC URL <input data-proxy="pacUrl" placeholder="http://wpad/wpad.dat" spellcheck="false"></label>
+        </div>
+        <p class="hint">SOCKS5 sends DNS through the proxy. Chromium doesn't support SOCKS5 passwords: use an HTTP(S) proxy for login-protected servers.</p>
+        <div class="actions"><button class="primary" id="proxysave">Apply proxy</button><span class="saved" id="proxysaved"></span></div>
       </div>
     </section>
 
@@ -346,40 +376,6 @@
           <span class="dnsbtns"><button type="button" id="tornew" disabled>New circuit</button><button type="button" id="torcheck" disabled>Check</button></span>
         </div>
         <p class="hint">Tor replaces the proxy below while it's on. "New circuit" gives new connections a different Tor IP. Tor hides your IP, but it isn't Tor Browser: logging in to sites still identifies you.</p>
-      </div>
-    </section>
-
-    <section id="proxy">
-      <h2>Proxy</h2>
-      <div class="card">
-        <div class="row col">
-          <div class="radios">
-            <label><input type="radio" name="pmode" value="system" data-proxy="mode"> <span><b>Use system proxy</b><small>Follows your system proxy settings.</small></span></label>
-            <label><input type="radio" name="pmode" value="direct" data-proxy="mode"> <span><b>No proxy</b><small>Connect directly.</small></span></label>
-            <label><input type="radio" name="pmode" value="manual" data-proxy="mode"> <span><b>Manual</b><small>HTTP, HTTPS, SOCKS4 or SOCKS5 server.</small></span></label>
-            <label><input type="radio" name="pmode" value="pac" data-proxy="mode"> <span><b>Auto-config (PAC) URL</b></span></label>
-          </div>
-        </div>
-        <div class="grid" id="manualfields">
-          <label>Type
-            <select data-proxy="type">
-              <option value="socks5">SOCKS5</option>
-              <option value="socks4">SOCKS4</option>
-              <option value="http">HTTP</option>
-              <option value="https">HTTPS</option>
-            </select>
-          </label>
-          <label>Host <input data-proxy="host" placeholder="127.0.0.1" spellcheck="false"></label>
-          <label>Port <input data-proxy="port" placeholder="1080" inputmode="numeric"></label>
-          <label>Username <input data-proxy="username" placeholder="optional" spellcheck="false" autocomplete="off"></label>
-          <label>Password <input data-proxy="password" type="password" placeholder="optional" autocomplete="new-password"></label>
-          <label class="wide">Bypass list <input data-proxy="bypass" placeholder="<local>, *.example.com" spellcheck="false"></label>
-        </div>
-        <div class="grid" id="pacfields">
-          <label class="wide">PAC URL <input data-proxy="pacUrl" placeholder="http://wpad/wpad.dat" spellcheck="false"></label>
-        </div>
-        <p class="hint">SOCKS5 sends DNS through the proxy. Chromium doesn't support SOCKS5 passwords: use an HTTP(S) proxy for login-protected servers.</p>
-        <div class="actions"><button class="primary" id="proxysave">Apply proxy</button><span class="saved" id="proxysaved"></span></div>
       </div>
     </section>
 

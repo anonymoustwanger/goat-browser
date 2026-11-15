@@ -1196,7 +1196,6 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <a href="#cookies">Cookies</a>
   <a href="#extensions">Extensions</a>
   <a href="#performance">Performance</a>
-  <a href="#proxy">Proxy</a>
   <a href="#tor">Tor</a>
   <a href="#data">Clear data</a>
   <a href="#about">About</a>
@@ -1234,6 +1233,19 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         </div>
         <div class="dnsstatus"><span id="dnsstate" class="muted">DNSSTATE</span>
           <span class="dnsbtns"><button type="button" id="dnscheck" DNSCHECKHIDE onclick="window.open(this.dataset.u)" data-u="DNSCHECK">Open check page</button></span>
+        </div>
+      </div>
+      <div class="row col" id="proxy">
+        <span><b>Proxy</b><small>Normal and private tabs. Tor tabs always use Tor. <em class="restart" data-restart="proxy" hidden>Restart Goat to apply.</em></small></span>
+        <div class="radios">
+          PX_SYSTEM
+          PX_NONE
+          PX_MANUAL
+        </div>
+        <div class="grid" id="pxfields">
+          <label>Type <select data-key="proxy_type" data-restartkey="proxy"><option value="socks5" PXT_SOCKS>SOCKS5</option><option value="http" PXT_HTTP>HTTP</option></select></label>
+          <label>Host <input data-key="proxy_host" data-restartkey="proxy" placeholder="127.0.0.1" spellcheck="false" value="PXHOST"></label>
+          <label>Port <input data-key="proxy_port" data-restartkey="proxy" placeholder="1080" spellcheck="false" value="PXPORT"></label>
         </div>
       </div>
     </div>
@@ -1469,25 +1481,6 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Memory saver</b><small>Background tabs you haven't used for a while free most of their memory. They come back when you open them.</small></span>
         <select data-key="sleep_after_min" data-number="1">SLEEPOPTS</select>
       </label>
-    </div>
-  </section>
-
-  <section id="proxy">
-    <h2>Proxy</h2>
-    <div class="card">
-      <div class="row col">
-        <span><b>Connection</b><small>Normal and private tabs. Tor tabs always use Tor. <em class="restart" data-restart="proxy" hidden>Restart Goat to apply.</em></small></span>
-        <div class="radios">
-          PX_SYSTEM
-          PX_NONE
-          PX_MANUAL
-        </div>
-        <div class="grid" id="pxfields">
-          <label>Type <select data-key="proxy_type" data-restartkey="proxy"><option value="socks5" PXT_SOCKS>SOCKS5</option><option value="http" PXT_HTTP>HTTP</option></select></label>
-          <label>Host <input data-key="proxy_host" data-restartkey="proxy" placeholder="127.0.0.1" spellcheck="false" value="PXHOST"></label>
-          <label>Port <input data-key="proxy_port" data-restartkey="proxy" placeholder="1080" spellcheck="false" value="PXPORT"></label>
-        </div>
-      </div>
     </div>
   </section>
 

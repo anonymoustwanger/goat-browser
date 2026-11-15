@@ -41,6 +41,8 @@ pub enum Notice {
     TabIn(String),
     /// The window opened for a dragged-out tab is showing (the preview can go).
     TearReady,
+    /// The standby window's answer for a dragged-out tab (tab id, took it).
+    TearDone(u32, bool),
     /// This hidden standby window takes a dragged-out tab.
     StandbyAdopt(String),
     /// Close the standby window (the setting was turned off).
