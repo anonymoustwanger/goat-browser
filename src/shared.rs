@@ -31,6 +31,8 @@ pub enum Notice {
     ExtensionEnabled(String, bool),
     /// Settings → About → Check for updates.
     CheckUpdate,
+    /// Another app opened a link while Goat was running: a tab here, and come to the front.
+    External(String),
     /// An update check finished (true = you asked for it).
     UpdateChecked(Result<crate::updater::Found, String>, bool),
 }

@@ -26,6 +26,8 @@ mod themes;
 mod tor;
 mod updater;
 #[cfg(windows)]
+mod instance;
+#[cfg(windows)]
 mod winhooks;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -433,6 +435,15 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
+    // Goat is already open (same profile): hand the link to it instead of opening a window.
+    #[cfg(windows)]
+    if launch.window.is_empty() {
+        if let Some(u) = &launch.url {
+            if instance::forward(&launch.profile, u) {
+                return Ok(());
+            }
+        }
+    }
     // Private, Tor, no-GPU and profile windows get their own taskbar button instead of being
     // grouped with the main window (the main window keeps Windows' default, so pins still work).
     #[cfg(windows)]
@@ -614,6 +625,11 @@ fn main() -> eframe::Result<()> {
                 fonts_ok,
             };
             app.window_kind = window_kind;
+            #[cfg(windows)]
+            if window_kind == TabKind::Normal && store::launch().window.is_empty() {
+                let sh = app.sh.clone();
+                instance::listen(&store::launch().profile, move |url| (sh.notify)(shared::Notice::External(url)));
+            }
             app.start_url = Some(match (start, window_kind) {
                 (Some(a), _) => resolve_input(&app.settings(), &a),
                 (None, TabKind::Private) => format!("{INTERNAL_BASE}/newtab?private=1"),
@@ -1538,6 +1554,27 @@ impl App {
                 Notice::OpenTorTab => cmds.push(Cmd::NewTorTab),
                 Notice::OpenProfile(name) => cmds.push(Cmd::OpenProfile(name)),
                 Notice::CheckUpdate => self.check_update(true),
+                Notice::External(raw) => {
+                    let url = resolve_input(&self.settings(), &raw);
+                    if let Err(e) = self.open_tab(frame, &url, TabKind::Normal) {
+                        self.toast(format!("Couldn't open tab: {e}"));
+                    }
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Minimized(false));
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+                    #[cfg(windows)]
+                    {
+                        let hwnd = panels::MAIN_HWND.load(Ordering::Relaxed);
+                        if hwnd != 0 {
+                            unsafe {
+                                let h = windows::Win32::Foundation::HWND(hwnd as *mut _);
+                                if windows::Win32::UI::WindowsAndMessaging::IsIconic(h).as_bool() {
+                                    let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(h, windows::Win32::UI::WindowsAndMessaging::SW_RESTORE);
+                                }
+                                let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(h);
+                            }
+                        }
+                    }
+                }
                 Notice::UpdateChecked(r, asked) => {
                     self.update_checking = false;
                     match r {
