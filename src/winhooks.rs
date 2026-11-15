@@ -141,7 +141,7 @@ pub fn install_adblock(
                 crate::crashlog::debug(format!("slow check {took:?} {uri:.200}"));
             }
             if block {
-                let response = env.CreateWebResourceResponse(None, 403, w!("Blocked by Goatr"), w!(""))?;
+                let response = env.CreateWebResourceResponse(None, 403, w!("Blocked by Goat"), w!(""))?;
                 args.SetResponse(&response)?;
                 crate::crashlog::note_blocked(&format!("[{rtype}] {uri}"));
                 on_block(blocked.fetch_add(1, Ordering::Relaxed) + 1);
@@ -195,7 +195,7 @@ pub fn set_memory_low(webview: &wry::WebView, low: bool) {
     }
 }
 
-/// CPU cores and priority for Goatr and all its page processes.
+/// CPU cores and priority for Goat and all its page processes.
 /// `cores` 0 = all. `priority`: normal | above | high.
 pub fn apply_cpu(webview: Option<&wry::WebView>, cores: u32, priority: &str) {
     use windows::Win32::System::Threading::{
@@ -286,7 +286,7 @@ pub fn add_extension(webview: &wry::WebView, folder: &std::path::Path, done: imp
     }
 }
 
-/// Links to apps (roblox-player:, steam:, …) started from frames or scripts: Goatr asks first.
+/// Links to apps (roblox-player:, steam:, …) started from frames or scripts: Goat asks first.
 pub fn watch_external_links(webview: &wry::WebView, ask: impl Fn(String, String) + 'static) {
     unsafe {
         let Ok(c18) = webview.webview().cast::<ICoreWebView2_18>() else { return };
@@ -339,11 +339,11 @@ pub fn scheme_app_name(scheme: &str) -> Option<String> {
 }
 
 thread_local! {
-    /// The right-click waiting for Goatr's menu: the engine waits until we answer.
+    /// The right-click waiting for Goat's menu: the engine waits until we answer.
     static PENDING_MENU: std::cell::RefCell<Option<(ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Deferral)>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Replace the engine's right-click menu with Goatr's. `show` gets what was clicked;
+/// Replace the engine's right-click menu with Goat's. `show` gets what was clicked;
 /// answer with `finish_context_menu`.
 pub fn watch_context_menu(webview: &wry::WebView, show: impl Fn(crate::shared::PageMenu) + 'static) {
     unsafe {
@@ -469,7 +469,7 @@ pub fn monitor_refresh(hwnd: isize) -> Option<u32> {
     }
 }
 
-/// Goatr's own "can't reach this page" instead of the engine's Edge-branded one.
+/// Goat's own "can't reach this page" instead of the engine's Edge-branded one.
 /// A failed load opens `goat://neterror?u=…&e=…`; going back past it skips the dead entry.
 pub fn watch_load_errors(webview: &wry::WebView) {
     use std::{cell::RefCell, rc::Rc};

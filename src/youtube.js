@@ -1,4 +1,4 @@
-// Goatr: YouTube ads. YouTube serves its video ads from its own servers, inside the same data
+// Goat: YouTube ads. YouTube serves its video ads from its own servers, inside the same data
 // as the video, so blocking addresses isn't enough (uBlock does the same as this): the ad
 // entries are removed from the player's data before YouTube reads them, ad boxes are hidden,
 // and any ad that still starts is skipped.

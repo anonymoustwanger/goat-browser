@@ -1,10 +1,10 @@
 'use strict';
-// Goatr's own installer and uninstaller, with Goatr's look.
+// Goat's own installer and uninstaller, with Goat's look.
 //   GoatBrowser.exe --goat-setup      (started by the small NSIS bootstrapper from a temp folder)
 //   GoatBrowser.exe --goat-uninstall  (Windows "Apps > Uninstall", or Settings > About)
-//   GoatBrowser.exe --goat-quit       (helper: asks a running Goatr to close; exit 0 = none was running)
-// Installs per user (no admin) into %LOCALAPPDATA%\Programs\Goatr and registers Goatr
-// as a browser in HKCU. Your profile in %APPDATA%\Goatr is never touched unless you
+//   GoatBrowser.exe --goat-quit       (helper: asks a running Goat to close; exit 0 = none was running)
+// Installs per user (no admin) into %LOCALAPPDATA%\Programs\Goat and registers Goat
+// as a browser in HKCU. Your profile in %APPDATA%\Goat is never touched unless you
 // choose to delete it while uninstalling.
 
 const { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } = require('electron');
@@ -14,7 +14,7 @@ const ofs = require('original-fs'); // plain fs: sees app.asar as a file, not a 
 const { execFile, spawn } = require('child_process');
 
 const MODE = process.argv.includes('--goat-uninstall') ? 'uninstall' : 'install';
-const APP = 'Goatr';
+const APP = 'Goat';
 const EXE = process.platform === 'win32' ? 'GoatBrowser.exe' : path.basename(process.execPath);
 const REGKEY = 'GoatBrowser';
 const PROGID = 'GoatHTML';
@@ -30,8 +30,8 @@ const DEFAULT_DIR = process.env.GOAT_SETUP_DIR || (process.platform === 'win32'
   ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', APP)
   : path.join(os.homedir(), '.local', 'share', 'goat-browser'));
 
-// --goat-quit helper: if Goatr is running, the single-instance lock fails and the running
-// Goatr receives our argv (it saves and closes). Exit code tells the caller which happened.
+// --goat-quit helper: if Goat is running, the single-instance lock fails and the running
+// Goat receives our argv (it saves and closes). Exit code tells the caller which happened.
 if (process.argv.includes('--goat-quit')) {
   // A profile other than the default has its own lock in its own folder.
   const pa = process.argv.find((x) => x.startsWith('--goat-profile='));
@@ -53,7 +53,7 @@ const exec = (file, args) => new Promise((resolve) => {
   execFile(file, args, { windowsHide: true, timeout: 20000 }, (err, stdout) => resolve({ ok: !err, code: err ? err.code : 0, out: String(stdout || '') }));
 });
 
-// Ask any running Goatr to close; resolves true when none is left.
+// Ask any running Goat to close; resolves true when none is left.
 async function closeRunningGoat(timeoutMs = 10000) {
   const helperArgs = [...(process.defaultApp ? [app.getAppPath()] : []), ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : []), '--goat-quit'];
   const t0 = Date.now();
@@ -101,7 +101,7 @@ async function register(dir) {
       UninstallString: `"${exe}" --goat-uninstall`, QuietUninstallString: `"${exe}" --goat-uninstall --silent`,
       URLInfoAbout: 'https://github.com/anonymoustwanger/goat-browser', NoModify: 1, NoRepair: 1, EstimatedSize: dirSizeKb(dir),
     }],
-    [CLASSES, { '@': 'Goatr HTML Document', 'URL Protocol': '' }],
+    [CLASSES, { '@': 'Goat HTML Document', 'URL Protocol': '' }],
     [`${CLASSES}\\DefaultIcon`, { '@': icon }],
     [`${CLASSES}\\shell\\open\\command`, { '@': `"${exe}" "%1"` }],
     [`${CLASSES}\\Application`, { ApplicationName: APP, ApplicationIcon: icon }],
@@ -118,7 +118,7 @@ async function register(dir) {
   ofs.writeFileSync(file, regFile(entries));
   const r = await exec('reg', ['import', file]);
   try { ofs.rmSync(file, { force: true }); } catch { /* ignore */ }
-  if (!r.ok) throw new Error("couldn't register Goatr with Windows");
+  if (!r.ok) throw new Error("couldn't register Goat with Windows");
 }
 async function unregister() {
   if (!isWin) return;
@@ -134,7 +134,7 @@ function makeShortcut(file, dir) {
   shell.writeShortcutLink(file, 'create', { target: exe, cwd: dir, icon: exe, iconIndex: 0, description: 'Private, fast browser', appUserModelId: 'com.goat.browser' });
 }
 
-// Where Goatr is installed now (for updates and the uninstaller).
+// Where Goat is installed now (for updates and the uninstaller).
 async function installedDir() {
   if (MODE === 'uninstall') return SOURCE_DIR;
   if (isWin) {
@@ -173,7 +173,7 @@ function run() {
       profileDir: PROFILE_DIR, dark: nativeTheme.shouldUseDarkColors,
     })));
     ipcMain.handle('setup:choose-dir', own(async (current) => {
-      const r = await dialog.showOpenDialog(win, { title: 'Install Goatr to…', defaultPath: current, properties: ['openDirectory', 'createDirectory'] });
+      const r = await dialog.showOpenDialog(win, { title: 'Install Goat to…', defaultPath: current, properties: ['openDirectory', 'createDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
       const p = r.filePaths[0];
       return path.basename(p).toLowerCase() === APP.toLowerCase() ? p : path.join(p, APP);
@@ -184,8 +184,8 @@ function run() {
     ipcMain.handle('setup:install', own(async (opts) => {
       const dir = String((opts && opts.dir) || DEFAULT_DIR);
       try {
-        send('setup:progress', { step: 'Closing Goatr…', pct: 0 });
-        if (!(await closeRunningGoat())) return { ok: false, error: 'Goatr is still open. Close all Goatr windows, then click Install again.' };
+        send('setup:progress', { step: 'Closing Goat…', pct: 0 });
+        if (!(await closeRunningGoat())) return { ok: false, error: 'Goat is still open. Close all Goat windows, then click Install again.' };
         const files = walk(SOURCE_DIR);
         const total = files.reduce((a, f) => a + f.size, 0) || 1;
         ofs.mkdirSync(dir, { recursive: true });
@@ -214,7 +214,7 @@ function run() {
         return { ok: true, dir };
       } catch (err) {
         const busy = err && (err.code === 'EBUSY' || err.code === 'EPERM');
-        return { ok: false, error: busy ? 'Some Goatr files are in use. Close all Goatr windows (including private and Tor windows), then click Install again.' : String(err.message || err) };
+        return { ok: false, error: busy ? 'Some Goat files are in use. Close all Goat windows (including private and Tor windows), then click Install again.' : String(err.message || err) };
       }
     }));
     let installedTo = null;
@@ -227,8 +227,8 @@ function run() {
     ipcMain.handle('setup:uninstall', own(async (opts) => {
       const dir = SOURCE_DIR; // the uninstaller runs from the installed copy
       try {
-        send('setup:progress', { step: 'Closing Goatr…', pct: 5 });
-        if (!(await closeRunningGoat())) return { ok: false, error: 'Goatr is still open. Close all Goatr windows, then try again.' };
+        send('setup:progress', { step: 'Closing Goat…', pct: 5 });
+        if (!(await closeRunningGoat())) return { ok: false, error: 'Goat is still open. Close all Goat windows, then try again.' };
         send('setup:progress', { step: 'Removing shortcuts…', pct: 30 });
         for (const f of [startMenuLink(), desktopLink()]) { try { ofs.rmSync(f, { force: true }); } catch { /* none */ } }
         send('setup:progress', { step: 'Removing from Windows…', pct: 55 });
@@ -258,10 +258,10 @@ function run() {
   app.on('window-all-closed', () => app.quit());
 }
 
-// The install folder can't be deleted while Goatr runs from it, so a hidden helper
+// The install folder can't be deleted while Goat runs from it, so a hidden helper
 // deletes it a moment after this process exits.
 function scheduleSelfDelete(dir) {
-  if (!ofs.existsSync(path.join(dir, MARKER))) return; // only ever delete a folder Goatr's installer created
+  if (!ofs.existsSync(path.join(dir, MARKER))) return; // only ever delete a folder Goat's installer created
   if (isWin) {
     const cmd = `ping 127.0.0.1 -n 4 >nul & rmdir /s /q "${dir}"`;
     spawn('cmd.exe', ['/d', '/c', cmd], { detached: true, stdio: 'ignore', windowsHide: true, cwd: os.tmpdir() }).unref();

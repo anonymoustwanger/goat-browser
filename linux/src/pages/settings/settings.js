@@ -102,11 +102,11 @@ $('profileform').addEventListener('submit', async (e) => {
 function renderUpdate(u) {
   const st = $('updstate');
   const txt = {
-    idle: `You have Goatr ${u.current || ''}.`,
+    idle: `You have Goat ${u.current || ''}.`,
     checking: 'Checking for updates…',
-    latest: `You're up to date (Goatr ${u.current || u.version}).`,
-    available: `Goatr ${u.version} is available (you have ${u.current}).`,
-    downloading: `Downloading Goatr ${u.version}… ${u.progress || 0}%`,
+    latest: `You're up to date (Goat ${u.current || u.version}).`,
+    available: `Goat ${u.version} is available (you have ${u.current}).`,
+    downloading: `Downloading Goat ${u.version}… ${u.progress || 0}%`,
     ready: 'Starting the installer… click Update in its window.',
     error: `Couldn't check: ${u.error}`,
   }[u.state] || '';
@@ -403,7 +403,7 @@ async function renderTasks() {
   const box = $('tasklist');
   if (!box || document.hidden) return;
   const r = await api.tasks.list();
-  $('memtotal').textContent = `Goatr is using ${r.totalMb.toLocaleString()} MB: tabs ${(r.totalMb - r.browserMb).toLocaleString()} MB, browser engine ${r.browserMb.toLocaleString()} MB.`;
+  $('memtotal').textContent = `Goat is using ${r.totalMb.toLocaleString()} MB: tabs ${(r.totalMb - r.browserMb).toLocaleString()} MB, browser engine ${r.browserMb.toLocaleString()} MB.`;
   box.textContent = '';
   for (const t of r.rows.sort((a, b) => b.mb - a.mb)) {
     const status = t.asleep ? 'sleeping' : t.active ? 'open now' : '';
@@ -605,7 +605,7 @@ $('ed-delete').addEventListener('click', async () => {
 });
 
 (async () => {
-  if (!api) { document.body.textContent = 'Settings are only available inside Goatr.'; return; }
+  if (!api) { document.body.textContent = 'Settings are only available inside Goat.'; return; }
   const info = await api.getSettings();
   S = info.settings;
   PROFILES = info.profiles || {};
@@ -624,7 +624,7 @@ $('ed-delete').addEventListener('click', async () => {
   refreshDns();
   refreshTor();
   markNav();
-  $('about-text').textContent = `Goatr ${info.version} for Linux · Chromium ${info.chrome}. Data folder: ~/.config/Goatr.`;
+  $('about-text').textContent = `Goat ${info.version} for Linux · Chromium ${info.chrome}. Data folder: ~/.config/Goat.`;
   $('uninstallrow').hidden = !info.installed;
   api.profiles.list().then((p) => { PINFO = p; renderProfileList(); });
   api.updates.status().then((u) => { UCUR = u.current; UPLAT = u.platform; renderUpdate(u); if (u.state === 'idle') api.updates.check(); });

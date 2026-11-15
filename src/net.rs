@@ -14,7 +14,7 @@ fn agent() -> ureq::Agent {
         .tls_config(tls)
         .timeout_global(Some(Duration::from_secs(600)))
         .max_redirects(10)
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Goatr/0.2")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Goat/0.2")
         .build()
         .into()
 }

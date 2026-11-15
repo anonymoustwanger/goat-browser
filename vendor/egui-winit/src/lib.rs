@@ -2449,7 +2449,7 @@ pub fn create_winit_window_attributes(
         }
 
         // don't request the undecorated-window drop shadow in fullscreen (#8399)
-        // Goatr: no shadow hack for windows kept off the taskbar (pop-ups). The hack leaves a
+        // Goat: no shadow hack for windows kept off the taskbar (pop-ups). The hack leaves a
         // 1px black line along the top of see-through windows.
         let want_undecorated_shadow = !decorations.unwrap_or(true) && !fullscreen.unwrap_or(false) && _taskbar != Some(false);
         window_attributes = window_attributes.with_undecorated_shadow(want_undecorated_shadow);

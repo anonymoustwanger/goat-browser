@@ -1,13 +1,13 @@
 //! "Audio for Discord streaming" (Windows only, experimental).
 //!
-//! Page sound comes from the web engine's own processes (msedgewebview2.exe), not Goatr.exe, so
+//! Page sound comes from the web engine's own processes (msedgewebview2.exe), not Goat.exe, so
 //! Discord, which records the app whose window you stream, hears nothing. While this is on,
-//! Goatr records the web engine's sound (Windows' per-app loopback), plays it from Goatr.exe,
+//! Goat records the web engine's sound (Windows' per-app loopback), plays it from Goat.exe,
 //! and turns the engine's own sound down to inaudible so you don't hear it twice.
 //!
-//! The recording runs in a helper process (`Goatr.exe --audio-relay <engine pid>`), so a
+//! The recording runs in a helper process (`Goat.exe --audio-relay <engine pid>`), so a
 //! problem in Windows' audio code can never take the browser down. The helper stops (and gives
-//! the engine its sound back) when Goatr closes its input or exits.
+//! the engine its sound back) when Goat closes its input or exits.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,7 +88,7 @@ impl Drop for Relay {
     }
 }
 
-/// The helper's own log: data\\audio-relay.log (Goatr's debug.log belongs to the browser).
+/// The helper's own log: data\\audio-relay.log (Goat's debug.log belongs to the browser).
 fn log(line: &str) {
     use std::io::Write;
     let dir = crate::store::app_dir().join("data");
@@ -97,7 +97,7 @@ fn log(line: &str) {
     }
 }
 
-/// `Goatr.exe --audio-relay <pid>`: the helper process. Returns when stdin closes.
+/// `Goat.exe --audio-relay <pid>`: the helper process. Returns when stdin closes.
 pub fn helper_main(browser_pid: u32) {
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
@@ -200,7 +200,7 @@ fn run(browser_pid: u32, stop: &AtomicBool) -> Result<(), String> {
         cap.SetEventHandle(cap_event).map_err(|e| e.to_string())?;
         let capture: IAudioCaptureClient = cap.GetService().map_err(|e| e.to_string())?;
 
-        // Play it from Goatr.exe on the default speakers.
+        // Play it from Goat.exe on the default speakers.
         let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
         let device = devices.GetDefaultAudioEndpoint(eRender, eConsole).map_err(|e| e.to_string())?;
         let out: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|e| e.to_string())?;

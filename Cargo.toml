@@ -1,5 +1,5 @@
 [package]
-name = "goatr"
+name = "goat"
 version = "1.0.0"
 edition = "2021"
 description = "A Rust web browser built on WebView2"

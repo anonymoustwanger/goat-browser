@@ -19,7 +19,7 @@ async function doInstall() {
   show('s-work');
   const r = await api.install({ dir, desktop: $('o-desktop').checked, makeDefault: $('o-default').checked });
   if (!r.ok) { $('e-msg').textContent = r.error; show('s-error'); return; }
-  $('d-title').textContent = info.existing ? 'Goatr is updated' : 'Goatr is ready';
+  $('d-title').textContent = info.existing ? 'Goat is updated' : 'Goat is ready';
   $('d-sub').textContent = info.existing ? `You're on version ${info.version}. Your tabs and settings are kept.` : 'Find it in the Start menu any time.';
   $('d-open').hidden = false;
   show('s-done');
@@ -31,8 +31,8 @@ async function doUninstall() {
   show('s-work');
   const r = await api.uninstall({ removeProfile: $('o-profile').checked });
   if (!r.ok) { $('e-msg').textContent = r.error; show('s-error'); return; }
-  $('d-title').textContent = 'Goatr was removed';
-  $('d-sub').textContent = $('o-profile').checked ? 'Your profile was deleted too. Thanks for trying Goatr.' : 'Your profile was kept, in case you come back. Thanks for trying Goatr.';
+  $('d-title').textContent = 'Goat was removed';
+  $('d-sub').textContent = $('o-profile').checked ? 'Your profile was deleted too. Thanks for trying Goat.' : 'Your profile was kept, in case you come back. Thanks for trying Goat.';
   $('d-open').hidden = true;
   show('s-done');
 }
@@ -56,7 +56,7 @@ $('o-change').onclick = async () => {
   info = await api.info();
   document.documentElement.dataset.theme = info.dark ? 'midnight' : 'daylight';
   if (info.mode === 'uninstall') {
-    $('bartitle').textContent = 'Uninstall Goatr';
+    $('bartitle').textContent = 'Uninstall Goat';
     $('c-sub').textContent = `Version ${info.version} will be removed from this computer.`;
     $('c-profile').textContent = info.profileDir;
     show('s-confirm');
@@ -64,7 +64,7 @@ $('o-change').onclick = async () => {
     dir = info.dir;
     $('o-dir').textContent = dir; $('o-dir').title = dir;
     if (info.existing) {
-      $('w-title').textContent = 'Update Goatr';
+      $('w-title').textContent = 'Update Goat';
       $('w-sub').textContent = info.existingVersion && info.existingVersion !== info.version
         ? `Version ${info.existingVersion} → ${info.version}. Your tabs, cookies and settings are kept.`
         : `Reinstall version ${info.version}. Your tabs, cookies and settings are kept.`;

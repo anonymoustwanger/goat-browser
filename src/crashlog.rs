@@ -1,5 +1,5 @@
 //! Crash reporting: Rust panics and Windows crashes are written to `data\crash.log` next to
-//! Goatr.exe (release builds have no console). A short trail of recent actions is included.
+//! Goat.exe (release builds have no console). A short trail of recent actions is included.
 
 use std::collections::VecDeque;
 use std::io::Write;
@@ -213,7 +213,7 @@ unsafe fn main_stack() -> String {
         out.push_str("[UI thread]\n");
         out.push_str(&unsafe { walk(main) }.map(fmt).unwrap_or_else(|| "  (couldn't read)".into()));
     }
-    // Other threads of Goatr (names where set).
+    // Other threads of Goat (names where set).
     let me = unsafe { GetCurrentThreadId() };
     let pid = unsafe { GetCurrentProcessId() };
     let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }) else { return out };
@@ -238,7 +238,7 @@ unsafe fn main_stack() -> String {
         let Some(pcs) = pcs else { continue };
         // Skip threads that are just idle inside system DLLs (WebView2 / thread-pool workers).
         let text = fmt(pcs);
-        if !text.contains("Goatr.exe") && !text.contains("goatr.exe") {
+        if !text.contains("Goat.exe") && !text.contains("goat.exe") {
             continue;
         }
         out.push_str(&format!("\n[thread {tid} {name}]\n{text}"));
@@ -255,7 +255,7 @@ pub fn write(kind: &str, detail: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("crash.log")) {
         let _ = writeln!(
             f,
-            "==== {} — Goatr {} — {kind}\n{detail}\n-- recent actions --\n{trail}\n-- recently blocked by the ad blocker --\n{blocked}\n",
+            "==== {} — Goat {} — {kind}\n{detail}\n-- recent actions --\n{trail}\n-- recently blocked by the ad blocker --\n{blocked}\n",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
             env!("CARGO_PKG_VERSION")
         );

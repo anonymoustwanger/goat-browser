@@ -1,26 +1,26 @@
 THIRD-PARTY SOFTWARE NOTICES
-Goatr
+Goat
 =====================================================================
 
-Goatr includes or uses the third-party software listed below. Each is
+Goat includes or uses the third-party software listed below. Each is
 the property of its respective copyright holders and is used under the
 license shown. Where a package offers a choice of licenses (for example
-"MIT OR Apache-2.0"), Goatr uses it under the first license listed that
+"MIT OR Apache-2.0"), Goat uses it under the first license listed that
 appears in full below.
 
 Contents
   1. Microsoft Edge WebView2 (WebView2Loader.dll)
-  2. Rust libraries compiled into Goatr.exe and GoatrSetup.exe
-  3. Software Goatr downloads while running
+  2. Rust libraries compiled into Goat.exe and GoatSetup.exe
+  3. Software Goat downloads while running
   4. Full license texts referenced above
 
 =====================================================================
 1. Microsoft Edge WebView2
 =====================================================================
 
-WebView2Loader.dll (Microsoft.Web.WebView2 SDK), shipped next to Goatr.exe.
-Goatr uses the Microsoft Edge WebView2 Runtime already installed with
-Windows; the Runtime itself is not distributed with Goatr.
+WebView2Loader.dll (Microsoft.Web.WebView2 SDK), shipped next to Goat.exe.
+Goat uses the Microsoft Edge WebView2 Runtime already installed with
+Windows; the Runtime itself is not distributed with Goat.
 
 Copyright (C) Microsoft Corporation. All rights reserved.
 
@@ -2017,7 +2017,7 @@ Copyright (c) Emil Ernerfeldt
 [MIT License text in section 4]
 
 
-Fonts bundled in Goatr.exe and GoatrSetup.exe by this package:
+Fonts bundled in Goat.exe and GoatSetup.exe by this package:
 
 [fonts/Hack-Regular.txt]
 The work in the Hack project is Copyright 2018 Source Foundry Authors and licensed under the MIT License
@@ -8708,7 +8708,7 @@ freely, subject to the following restrictions:
 3. This notice may not be removed or altered from any source distribution.
 
 =====================================================================
-3. Software Goatr downloads while running (not shipped with Goatr)
+3. Software Goat downloads while running (not shipped with Goat)
 =====================================================================
 
 These are fetched from their publishers when you turn the feature on.

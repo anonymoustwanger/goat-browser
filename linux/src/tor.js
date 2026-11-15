@@ -1,5 +1,5 @@
 'use strict';
-// Built-in Tor. On first use Goatr downloads the official Tor Expert Bundle from
+// Built-in Tor. On first use Goat downloads the official Tor Expert Bundle from
 // torproject.org, checks its SHA-256 against the sums file signed by the Tor
 // Browser team (OpenPGP, key fingerprint pinned below), unpacks it into the
 // profile, and runs tor.exe in the background as a local SOCKS5 proxy.
@@ -68,7 +68,7 @@ function freePort(preferred) {
 
 class Tor {
   constructor({ dir, stateDir, onChange }) {
-    this.dir = dir; // %APPDATA%\Goatr\tor (tor.exe + geoip)
+    this.dir = dir; // %APPDATA%\Goat\tor (tor.exe + geoip)
     this.stateDir = stateDir || path.join(dir, 'state'); // Tor's own data (one per running Tor)
     this.onChange = onChange || (() => {});
     this.state = 'off'; // off | downloading | starting | on | error
@@ -211,7 +211,7 @@ class Tor {
         '--CookieAuthentication', '1',
         '--Log', 'notice stdout',
         '--AvoidDiskWrites', '1',
-        // Tor stops by itself if Goatr goes away, even after a crash.
+        // Tor stops by itself if Goat goes away, even after a crash.
         '__OwningControllerProcess', String(process.pid),
       ];
       if (fs.existsSync(path.join(data, 'geoip'))) args.push('--GeoIPFile', path.join(data, 'geoip'));

@@ -18,15 +18,15 @@ if (code === 'crashed') {
   title = 'Connection not trusted';
   why = `${host} sent a security certificate that can't be verified. Someone may be intercepting the connection.`;
 } else if (n === -105 || n === -137) {
-  why = `The address ${host} could not be found. Check the spelling. Goatr resolves names over encrypted DNS (Quad9 / Mullvad); networks that block these servers can also cause this.`;
+  why = `The address ${host} could not be found. Check the spelling. Goat resolves names over encrypted DNS (Quad9 / Mullvad); networks that block these servers can also cause this.`;
 } else if (n === -102 || n === -101 || n === -100 || n === -118) {
   why = `${host} refused or dropped the connection.`;
-  if (q.get('http') === '1') why += ' The site may not support HTTPS. Goatr only opens plain-HTTP sites when you say so.';
+  if (q.get('http') === '1') why += ' The site may not support HTTPS. Goat only opens plain-HTTP sites when you say so.';
 } else if (n === -106) {
   why = "You're offline. Check your internet connection.";
 } else if (n === -20 || n === -21) {
   title = 'Blocked';
-  why = 'This request was blocked by Goatr (tracker or ad domain).';
+  why = 'This request was blocked by Goat (tracker or ad domain).';
 }
 document.title = title;
 document.getElementById('title').textContent = title;

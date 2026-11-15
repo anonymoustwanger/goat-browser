@@ -44,7 +44,7 @@ api.onState((s) => {
   document.getElementById('ver').textContent = s.version ? `v${s.version}` : '';
   document.getElementById('profname').textContent = s.profile || '';
   document.getElementById('updateitem').hidden = !s.update;
-  document.getElementById('updatelabel').textContent = s.update ? `Update to Goatr ${s.update}` : 'Update Goatr';
+  document.getElementById('updatelabel').textContent = s.update ? `Update to Goat ${s.update}` : 'Update Goat';
   report();
 });
 function report() { api.size(document.getElementById('card').getBoundingClientRect().height + 24); }

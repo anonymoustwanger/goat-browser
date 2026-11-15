@@ -1,5 +1,5 @@
 'use strict';
-// Runs in every frame, but only exposes an API to Goatr's own internal pages.
+// Runs in every frame, but only exposes an API to Goat's own internal pages.
 // The main process re-checks the sender's URL on every call.
 const { contextBridge, ipcRenderer } = require('electron');
 

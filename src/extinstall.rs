@@ -1,6 +1,6 @@
 //! Installing extensions from the Chrome Web Store / Edge Add-ons.
 //!
-//! WebView2 can only load *unpacked* extensions, so Goatr downloads the store's .crx package,
+//! WebView2 can only load *unpacked* extensions, so Goat downloads the store's .crx package,
 //! strips the CRX header, and unzips it into `extensions\<id>`. A restart loads it.
 
 use std::io::Read;
@@ -71,7 +71,7 @@ fn crx_zip(data: &[u8]) -> Result<&[u8], String> {
 
 /// Download and unpack. Returns the extension's display name.
 /// The Web Store's own "Add to Chrome" button makes WebView2 download a .crx from Google's
-/// update service; pull the extension id out of that request so Goatr can install it.
+/// update service; pull the extension id out of that request so Goat can install it.
 pub fn id_from_crx_download(url: &str, path: &str) -> Option<String> {
     let lower = url.to_lowercase();
     if !(lower.contains("prod=chromiumcrx") || lower.contains("clients2.google.com/service/update2/crx") || path.to_lowercase().ends_with(".crx")) {
@@ -92,7 +92,7 @@ pub fn id_from_crx_download(url: &str, path: &str) -> Option<String> {
 
 static INSTALLING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-/// A downloaded extension waiting for you to say yes (Goatr asks first, like Chrome).
+/// A downloaded extension waiting for you to say yes (Goat asks first, like Chrome).
 #[derive(Debug, Clone)]
 pub struct Pending {
     pub id: String,

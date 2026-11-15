@@ -1,12 +1,12 @@
-// Injected into every page Goatr loads: keyboard shortcuts, tab icons and find-on-page.
+// Injected into every page Goat loads: keyboard shortcuts, tab icons and find-on-page.
 (() => {
   if (window.top !== window || window.__goatr) return;
   const ipc = window.ipc;
   const post = m => { try { ipc.postMessage(JSON.stringify(m)); } catch (_) {} };
-  // Tell Goatr about clicks in the page, so its menus and suggestions close.
+  // Tell Goat about clicks in the page, so its menus and suggestions close.
   addEventListener('mousedown', () => post({ cmd: 'clicked' }), true);
 
-  // Extension pages: tabs they open go to Goatr (not the system's default browser). They get the
+  // Extension pages: tabs they open go to Goat (not the system's default browser). They get the
   // real tab back (so they can update or message it), can open it in the background, and
   // pop-up windows open as real pop-up windows.
   const installTabs = () => {
@@ -18,7 +18,7 @@
       const list = await origQuery({}).catch(() => []);
       const before = new Set(list.map(t => t.id));
       post({ cmd: 'open_tab', url, active: active !== false });
-      if (!list.length) return fake(url, active); // this extension can't see Goatr's tabs
+      if (!list.length) return fake(url, active); // this extension can't see Goat's tabs
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 100));
         const all = await origQuery({}).catch(() => []);
@@ -135,7 +135,7 @@
     document.addEventListener('DOMContentLoaded', () => { report(); try { new ResizeObserver(report).observe(document.body); } catch (_) {} });
   }
 
-  // Web stores: "Add to Chrome" / "Get" installs into Goatr instead of asking about Edge.
+  // Web stores: "Add to Chrome" / "Get" installs into Goat instead of asking about Edge.
   if (/^(chromewebstore\.google\.com|microsoftedge\.microsoft\.com)$/.test(location.hostname)) {
     document.addEventListener('click', e => {
       const b = e.target.closest && e.target.closest('button, [role=button], a');
@@ -149,7 +149,7 @@
     }, true);
   }
 
-  // Script errors on Goatr's own pages go to data\debug.log.
+  // Script errors on Goat's own pages go to data\debug.log.
   if (location.hostname === 'goatr.localhost' || location.protocol === 'goatr:' || location.protocol === 'chrome-extension:') {
     addEventListener('error', e => post({ cmd: 'js_error', msg: String(e.message) + ' @' + (e.lineno || 0) + ':' + (e.colno || 0) }));
     addEventListener('unhandledrejection', e => post({ cmd: 'js_error', msg: 'promise: ' + String(e.reason && (e.reason.stack || e.reason)) }));
@@ -187,7 +187,7 @@
     if (a) { e.preventDefault(); e.stopPropagation(); post({cmd: 'key', action: a}); }
   }, true);
 
-  // Ctrl + mouse wheel zooms (Goatr shows the zoom bubble).
+  // Ctrl + mouse wheel zooms (Goat shows the zoom bubble).
   let lastWheel = 0;
   window.addEventListener('wheel', e => {
     if (!(e.ctrlKey || e.metaKey) || !e.cancelable) return;

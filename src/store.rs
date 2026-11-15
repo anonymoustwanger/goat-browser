@@ -1,4 +1,4 @@
-//! Browser data (settings, bookmarks, history, downloads), saved as JSON in `data\` next to Goatr.exe.
+//! Browser data (settings, bookmarks, history, downloads), saved as JSON in `data\` next to Goat.exe.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -44,7 +44,7 @@ pub struct Settings {
     /// Themes you made (Settings → Appearance → Create theme).
     pub custom_themes: Vec<CustomTheme>,
     // ---- performance
-    /// 0 = all CPU cores, otherwise how many cores Goatr may use.
+    /// 0 = all CPU cores, otherwise how many cores Goat may use.
     pub cpu_cores: u32,
     /// normal | above | high
     pub cpu_priority: String,
@@ -60,7 +60,7 @@ pub struct Settings {
     pub app_links_allowed: Vec<String>,
     /// Zoom remembered per site (host → factor), like Chrome.
     pub site_zoom: std::collections::BTreeMap<String, f64>,
-    /// Experimental: play page sound from Goatr.exe so Discord can stream it.
+    /// Experimental: play page sound from Goat.exe so Discord can stream it.
     pub discord_audio: bool,
     /// Extensions (folder names) that also run in private windows.
     pub private_extensions: Vec<String>,
@@ -189,7 +189,7 @@ pub struct Store {
     path: PathBuf,
 }
 
-/// The folder Goatr.exe is in.
+/// The folder Goat.exe is in.
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -197,8 +197,8 @@ pub fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Where Goatr keeps everything (history, settings, browsing data, extensions, Tor):
-/// %APPDATA%\Goatr, like Goat Browser did. A file named `portable` next to Goatr.exe
+/// Where Goat keeps everything (history, settings, browsing data, extensions, Tor):
+/// %APPDATA%\Goat, like Goat Browser did. A file named `portable` next to Goat.exe
 /// keeps it all beside the .exe instead.
 pub fn app_dir() -> PathBuf {
     static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -217,19 +217,23 @@ pub fn app_dir() -> PathBuf {
 
 fn user_data_dir() -> Option<PathBuf> {
     #[cfg(windows)]
-    {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Goatr"))
-    }
+    let (base, new, old) = (std::env::var_os("APPDATA").map(PathBuf::from), "Goat", "Goatr");
     #[cfg(not(windows))]
-    {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
-            .map(|d| d.join("goatr"))
+    let (base, new, old) = (
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))),
+        "goat",
+        "goatr",
+    );
+    let base = base?;
+    // Data from when the browser was called Goatr.
+    let (dir, prev) = (base.join(new), base.join(old));
+    if !dir.exists() && prev.is_dir() {
+        let _ = std::fs::rename(&prev, &dir);
     }
+    Some(dir)
 }
 
-/// Older Goatr builds kept their data next to Goatr.exe: move it to the new place once.
+/// Older Goat builds kept their data next to Goat.exe: move it to the new place once.
 fn migrate_from(old: &std::path::Path, new: &std::path::Path) {
     if old == new || new.join("data").join("goatr-data.json").exists() {
         return;
@@ -273,7 +277,7 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()>
     Ok(())
 }
 
-/// How this Goatr window was started: `--window private|tor`, `--profile NAME`, and a URL.
+/// How this Goat window was started: `--window private|tor`, `--profile NAME`, and a URL.
 #[derive(Debug, Clone, Default)]
 pub struct Launch {
     pub window: String,
@@ -355,7 +359,7 @@ pub fn profile_logo(name: &str) -> (String, String) {
     (glyph, color)
 }
 
-/// Which profile opens when Goatr starts (with more than one profile): None = ask,
+/// Which profile opens when Goat starts (with more than one profile): None = ask,
 /// Some("") = Default, Some(name) = that profile. Kept in `startup-profile.txt`.
 pub fn startup_profile() -> Option<String> {
     let t = std::fs::read_to_string(app_dir().join("startup-profile.txt")).ok()?;

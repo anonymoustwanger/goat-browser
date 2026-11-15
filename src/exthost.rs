@@ -1,14 +1,14 @@
 //! Tab support for extensions. WebView2 has no tab strip, so when an extension calls
-//! chrome.tabs.create (or windows.create) it would open the system's default browser. Goatr adds
-//! a small script to each extension's background that sends those requests to Goatr instead,
-//! over a local connection only Goatr's extensions know the key for.
+//! chrome.tabs.create (or windows.create) it would open the system's default browser. Goat adds
+//! a small script to each extension's background that sends those requests to Goat instead,
+//! over a local connection only Goat's extensions know the key for.
 
 use crate::extinstall;
 use crate::shared::{Notice, Shared};
 use std::io::{Read, Write};
 use std::sync::Arc;
 
-const SHIM: &str = r#"// Added by Goatr: opens extension tabs in Goatr instead of the default browser.
+const SHIM: &str = r#"// Added by Goat: opens extension tabs in Goat instead of the default browser.
 (() => {
   const g = typeof globalThis !== 'undefined' ? globalThis : self;
   const c = g.chrome;
@@ -24,13 +24,13 @@ const SHIM: &str = r#"// Added by Goatr: opens extension tabs in Goatr instead o
   };
   const log = async (m) => { try { const k = await config(); await fetch('http://127.0.0.1:' + k.port + '/log?t=' + k.token + '&m=' + encodeURIComponent(c.runtime.id + ': ' + m), { mode: 'no-cors' }); } catch (_) {} };
   const fake = (url, active) => ({ id: -1, index: 0, windowId: -1, active: active !== false, url, pendingUrl: url, status: 'loading', incognito: false, highlighted: true, pinned: false, selected: true, discarded: false, autoDiscardable: true, groupId: -1 });
-  // The real tab, once Goatr has opened it (so the extension can update or message it).
+  // The real tab, once Goat has opened it (so the extension can update or message it).
   const origQuery = c.tabs.query.bind(c.tabs);
   const find = async (url, active) => {
     const list = await origQuery({}).catch(() => []);
     const before = new Set(list.map(t => t.id));
     open(url, active);
-    if (!list.length) return fake(url, active); // this extension can't see Goatr's tabs
+    if (!list.length) return fake(url, active); // this extension can't see Goat's tabs
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 100));
       const all = await origQuery({}).catch(() => []);
@@ -178,17 +178,17 @@ fn background_opens_tabs(dir: &std::path::Path, start: &[String]) -> bool {
     false
 }
 
-/// Make one extension use Goatr's tabs: shim file, key file, and its background loads the shim.
+/// Make one extension use Goat's tabs: shim file, key file, and its background loads the shim.
 pub fn prepare(dir: &std::path::Path) {
     // Chromium refuses to load an unpacked extension containing files that start with "_"
-    // (reported as "Access is denied"), so Goatr's files are named goatr-*.
+    // (reported as "Access is denied"), so Goat's files are named goatr-*.
     let Some((port, token)) = CONFIG.lock().unwrap().clone() else { return };
     let mpath = dir.join("manifest.json");
     let Ok(text) = std::fs::read_to_string(&mpath) else { return };
     let Ok(mut m) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) else { return };
     let bg = &mut m["background"];
     let mut changed = false;
-    // The original worker, even if Goatr already wrapped it.
+    // The original worker, even if Goat already wrapped it.
     let current_sw = bg["service_worker"].as_str().map(|s| s.trim_start_matches('/').to_string());
     let original_sw = match current_sw.as_deref() {
         Some(w @ ("_goatr_sw.js" | "goatr-sw.js")) => std::fs::read_to_string(dir.join(w)).ok().and_then(|w| {

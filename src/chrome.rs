@@ -209,7 +209,7 @@ impl App {
         }
         // "Always open this profile".
         let cy = top + 80.0 + rows as f32 * (tile.y + gap) + 14.0;
-        let label = "Always open the profile I pick when Goatr starts";
+        let label = "Always open the profile I pick when Goat starts";
         let w = 18.0 + 10.0 + text_width(ui, label, font(13.0));
         let row = Rect::from_min_size(pos2(full.center().x - w / 2.0, cy), vec2(w, 22.0));
         let cr = ui.interact(row, Id::new("picker-always"), Sense::click());
@@ -231,7 +231,7 @@ impl App {
     pub fn draw_chrome(&mut self, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let ctx = ui.ctx().clone();
         let pal = self.palette();
-        // Pop-up windows are see-through, so the clear colour is transparent; Goatr's own
+        // Pop-up windows are see-through, so the clear colour is transparent; Goat's own
         // window paints its background here instead.
         self.clear = [0.0, 0.0, 0.0, 0.0];
         let anim = self.animations();
@@ -898,7 +898,7 @@ impl App {
             }
         }
 
-        // Right side: "Add to Goatr" on store pages, then the star.
+        // Right side: "Add to Goat" on store pages, then the star.
         let mut right = rect.right() - 6.0;
         let zoom = self.active_tab().map(|t| t.zoom).unwrap_or(1.0);
         let zoom_btn = (zoom - 1.0).abs() > 0.001;
@@ -930,7 +930,7 @@ impl App {
                 cmds.push(Cmd::ToggleBookmark);
             }
             if !kind.is_private_like() && crate::extinstall::parse_store_url(url).is_some() {
-                let label = "Add to Goatr";
+                let label = "Add to Goat";
                 let w = 10.0 + 14.0 + 6.0 + text_width(ui, label, bold(12.0)) + 12.0;
                 let chip = Rect::from_min_size(pos2(right - w, cy - 12.0), vec2(w, 24.0));
                 right -= w + 6.0;
@@ -941,7 +941,7 @@ impl App {
                 }
                 icons::draw(&p, Rect::from_min_size(pos2(chip.left() + 10.0, cy - 7.0), Vec2::splat(14.0)), icons::PUZZLE, pal.ink, 1.5);
                 p.text(pos2(chip.left() + 30.0, cy), Align2::LEFT_CENTER, label, bold(12.0), pal.ink);
-                if r.on_hover_text("Install this extension in Goatr").clicked() {
+                if r.on_hover_text("Install this extension in Goat").clicked() {
                     cmds.push(Cmd::InstallExtension);
                 }
             }

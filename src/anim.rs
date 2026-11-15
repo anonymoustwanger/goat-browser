@@ -119,7 +119,7 @@ pub fn tween(ctx: &Context, id: Id, target: f32, dur: f32, ease: fn(f32) -> f32)
     }
     let k = ((now - tw.start) as f32 / tw.dur.max(0.001)).clamp(0.0, 1.0);
     if k < 1.0 {
-        // Pop-ups are drawn as part of Goatr's main window, so keep that redrawing too.
+        // Pop-ups are drawn as part of Goat's main window, so keep that redrawing too.
         ctx.request_repaint();
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }
@@ -138,7 +138,7 @@ pub fn since(ctx: &Context, start: f64, dur: f32) -> f32 {
     }
     let k = ((ctx.input(|i| i.time) - start) as f32 / dur).clamp(0.0, 1.0);
     if k < 1.0 {
-        // Pop-ups are drawn as part of Goatr's main window, so keep that redrawing too.
+        // Pop-ups are drawn as part of Goat's main window, so keep that redrawing too.
         ctx.request_repaint();
         ctx.request_repaint_of(egui::ViewportId::ROOT);
     }

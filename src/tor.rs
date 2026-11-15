@@ -1,4 +1,4 @@
-//! Tor support. On first use Goatr downloads the official Tor Expert Bundle from torproject.org
+//! Tor support. On first use Goat downloads the official Tor Expert Bundle from torproject.org
 //! into `tor\`, runs tor.exe in the background, and routes Tor tabs through it (SOCKS5).
 
 use std::io::{BufRead, BufReader};
@@ -111,7 +111,7 @@ impl Tor {
             self.download(notify)?;
         }
         for attempt in 0..8 {
-            // Tor already running for another Goatr window: share it.
+            // Tor already running for another Goat window: share it.
             if Control::open().is_ok() {
                 self.set("ready", 100, "Connected to Tor", notify);
                 crate::crashlog::debug("tor: sharing the Tor already running");
@@ -120,7 +120,7 @@ impl Tor {
                 return Ok(());
             }
             match self.spawn_tor(notify) {
-                // A Tor from a Goatr window that just closed still holds its folder: it exits
+                // A Tor from a Goat window that just closed still holds its folder: it exits
                 // within a few seconds, so wait for it.
                 Err(e) if e.contains("another Tor process") && attempt < 7 => {
                     self.set("starting", 0, "Waiting for the previous Tor to close…", notify);
@@ -143,7 +143,7 @@ impl Tor {
             .arg(&data)
             .arg("--ClientOnly")
             .arg("1")
-            // Tor exits by itself if Goatr closes or crashes.
+            // Tor exits by itself if Goat closes or crashes.
             .arg("--__OwningControllerProcess")
             .arg(std::process::id().to_string())
             .arg("--ControlPort")
@@ -267,7 +267,7 @@ impl Drop for Tor {
 // ------------------------------------------------------------------ control port
 
 /// Follow Tor's STREAM events into `streams` until the connection ends. With `own`, this
-/// connection also keeps the (shared) Tor alive for this window and ends it when Goatr exits.
+/// connection also keeps the (shared) Tor alive for this window and ends it when Goat exits.
 fn watch_loop(streams: Arc<Mutex<std::collections::HashMap<String, String>>>, own: bool) {
     let mut c = match Control::open() {
         Ok(c) => c,

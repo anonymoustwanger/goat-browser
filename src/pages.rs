@@ -52,7 +52,7 @@ pub fn resolve_input(settings: &Settings, input: &str) -> String {
     if let Some(rest) = s.strip_prefix("goat-extension://").or_else(|| s.strip_prefix("Goat-extension://")) {
         return format!("chrome-extension://{rest}");
     }
-    // goat://settings (and goatr://, edge://, chrome:// for Goatr's own pages).
+    // goat://settings (and goatr://, edge://, chrome:// for Goat's own pages).
     if let Some(u) = browser_page(&lower) {
         return u;
     }
@@ -77,7 +77,7 @@ pub fn resolve_input(settings: &Settings, input: &str) -> String {
     format!("{}{}", settings.search_prefix(), urlencoding::encode(s))
 }
 
-/// goat://… (also goatr://, edge://, chrome://, about:) → Goatr's own page for it, if it has one.
+/// goat://… (also goatr://, edge://, chrome://, about:) → Goat's own page for it, if it has one.
 pub fn browser_page(url: &str) -> Option<String> {
     let l = url.trim().to_lowercase();
     let rest = ["goat://", "goatr://", "edge://", "chrome://", "about:"].iter().find_map(|p| l.strip_prefix(p))?;
@@ -425,7 +425,7 @@ const SHARED_CSS: &str = include_str!("web/shared.css");
 const SETTINGS_CSS: &str = include_str!("web/settings.css");
 const HISTORY_CSS: &str = include_str!("web/history.css");
 
-/// Goatr additions on top of Goat's stylesheets.
+/// Goat additions on top of Goat's stylesheets.
 const EXTRA_CSS: &str = r#"
 :root { --card: var(--bg-2); --dur-1: 120ms; --dur-2: 200ms; --dur-3: 320ms;
   --ease-out: cubic-bezier(.16, 1, .3, 1); --ease-in: cubic-bezier(.5, 0, .75, 0);
@@ -517,7 +517,7 @@ fn short_host(url: &str) -> String {
     host_of(url).trim_start_matches("www.").to_string()
 }
 
-/// Links between Goatr's own list pages.
+/// Links between Goat's own list pages.
 fn navlinks(active: &str) -> String {
     let l = |id: &str, label: &str| format!("<a href=\"{INTERNAL_BASE}/{id}\" class=\"{}\">{label}</a>", if id == active { "on" } else { "" });
     format!(
@@ -569,7 +569,7 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
 <ul class="facts" FACTSHIDE>
   <li><b>Ads & trackers blocked.</b> Shield level: LEVEL. Click the shield to change it or pause it on a site.</li>
   <li><b>Private and Tor tabs.</b> Ctrl+Shift+N for a private tab, Alt+Shift+N for a Tor tab.</li>
-  <li><b>Extensions.</b> Install from the Chrome Web Store with “Add to Goatr” in the address bar.</li>
+  <li><b>Extensions.</b> Install from the Chrome Web Store with “Add to Goat” in the address bar.</li>
   <li><b>Your rules.</b> Themes, blocker level and more in <a href="INTERNAL/settings">Settings</a>.</li>
 </ul>
 </main>
@@ -599,7 +599,7 @@ fn tor_page(look: &Look) -> Resp {
 </div>
 <form id="search" class="search" action="INTERNAL/go" method="get" hidden><input name="q" placeholder="Search through Tor or enter address" autocomplete="off" spellcheck="false" aria-label="Search"></form>
 <p class="torlinks" id="links" hidden><a href="https://check.torproject.org/">Check my Tor connection</a></p>
-<p class="privnote" style="margin-top:24px">Goatr hides your IP through Tor with no DNS or WebRTC leaks, but it isn't Tor Browser: for strong anonymity against fingerprinting, use Tor Browser.</p>
+<p class="privnote" style="margin-top:24px">Goat hides your IP through Tor with no DNS or WebRTC leaks, but it isn't Tor Browser: for strong anonymity against fingerprinting, use Tor Browser.</p>
 </main>
 <script>
 async function poll() {
@@ -618,7 +618,7 @@ api('tor/start').then(poll);
     page_doc(look, "Tor tab", "private", "", &body)
 }
 
-/// Goatr's "can't reach this page" (replaces the engine's Edge-branded one).
+/// Goat's "can't reach this page" (replaces the engine's Edge-branded one).
 fn net_error(look: &Look, url: &str, code: i32) -> Resp {
     let host = short_host(url);
     let host = if host.is_empty() { url.to_string() } else { host };
@@ -627,9 +627,9 @@ fn net_error(look: &Look, url: &str, code: i32) -> Resp {
         12 | 6 => ("Can't connect to this site", "The site refused the connection or isn't reachable right now."),
         7 => ("This site took too long to answer", "It may be down or very slow."),
         9 | 10 | 11 => ("The connection was interrupted", "Your network may have dropped, or the site closed the connection."),
-        1 | 2 | 3 | 4 | 5 => ("This site's connection isn't secure", "Its certificate is invalid, expired or revoked, so Goatr stopped before sending anything."),
+        1 | 2 | 3 | 4 | 5 => ("This site's connection isn't secure", "Its certificate is invalid, expired or revoked, so Goat stopped before sending anything."),
         15 => ("This page redirects in a loop", "Try clearing this site's cookies."),
-        17 | 18 => ("This page needs you to sign in", "The site or a proxy asked for a password Goatr couldn't give."),
+        17 | 18 => ("This page needs you to sign in", "The site or a proxy asked for a password Goat couldn't give."),
         _ => ("Can't reach this page", "Something went wrong loading it."),
     };
     let js = serde_json::to_string(url).unwrap_or_default();
@@ -992,7 +992,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     };
 
     let body = r##"<nav class="side">
-  <div class="brand">goatr<span>.</span> settings</div>
+  <div class="brand">goat<span>.</span> settings</div>
   <a href="#general">General</a>
   <a href="#profiles">Profiles</a>
   <a href="#appearance">Appearance</a>
@@ -1014,7 +1014,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         <select data-key="search_engine">ENGINES</select>
       </label>
       <div class="row col">
-        <span><b>Home page</b><small>Opened by the home shortcut (Alt+Home) and when Goatr starts.</small></span>
+        <span><b>Home page</b><small>Opened by the home shortcut (Alt+Home) and when Goat starts.</small></span>
         <div class="radios">
           <label><input type="radio" name="home" value="newtab" HOME_NEWTAB> <span><b>New tab page</b></span></label>
           <label><input type="radio" name="home" value="custom" HOME_CUSTOM> <span><b>A specific page</b></span></label>
@@ -1025,7 +1025,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         TOGGLE_HTTPS
       </label>
       <div class="row col" id="dnsrow">
-        <label class="dnshead"><span><b>Encrypted DNS</b><small>Site lookups are sent encrypted (DNS over HTTPS), so your internet provider can't see or change them. <em class="restart" data-restart="dns" hidden>Restart Goatr to apply.</em></small></span>
+        <label class="dnshead"><span><b>Encrypted DNS</b><small>Site lookups are sent encrypted (DNS over HTTPS), so your internet provider can't see or change them. <em class="restart" data-restart="dns" hidden>Restart Goat to apply.</em></small></span>
           <select data-key="dns_provider" id="dnsprovider" data-restartkey="dns">DNSOPTS</select>
         </label>
         <div class="grid" id="dnsnext" hidden>
@@ -1046,7 +1046,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <div class="card">
       <p class="hint">Each profile has its own cookies, history, bookmarks, extensions and settings, in its own window. You're in: <b>CURPROFILE</b>.</p>
       <div class="extlist">PROFILELIST</div>
-      <label class="row"><span><b>When Goatr starts</b><small>With more than one profile, Goatr can ask which one to use, or always open the same one.</small></span>
+      <label class="row"><span><b>When Goat starts</b><small>With more than one profile, Goat can ask which one to use, or always open the same one.</small></span>
         <select id="startprof" onchange="setStartProfile(this.value)">STARTPROFOPTS</select>
       </label>
       <form class="inline" id="profform">
@@ -1060,7 +1060,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <h2>Appearance</h2>
     <div class="card">
       <div class="row col">
-        <span><b>Theme</b><small>Applies to the toolbar, Goatr's own pages, and tells websites to use dark or light mode.</small></span>
+        <span><b>Theme</b><small>Applies to the toolbar, Goat's own pages, and tells websites to use dark or light mode.</small></span>
         <div class="themes" role="radiogroup" aria-label="Theme">THEMES</div>
       </div>
       <div class="row col" id="editor" hidden>
@@ -1108,7 +1108,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <h2>Privacy</h2>
     <div class="card">
       <div class="row col">
-        <span><b>Profile</b><small>Sets the speed-vs-privacy switches in one click: preloading, font blocking, fingerprint protection, ad blocking level and DNS. You can still change any of them below. <em class="restart" data-restart="profile" hidden>Restart Goatr to apply fully.</em></small></span>
+        <span><b>Profile</b><small>Sets the speed-vs-privacy switches in one click: preloading, font blocking, fingerprint protection, ad blocking level and DNS. You can still change any of them below. <em class="restart" data-restart="profile" hidden>Restart Goat to apply fully.</em></small></span>
         <div class="profiles" role="radiogroup" aria-label="Settings profile">PROFILES</div>
       </div>
     </div>
@@ -1141,13 +1141,13 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Trim referrers</b><small>When you open another site, it isn't told which page you came from. Things loaded from other servers only see the site name, not the page.</small></span>
         TOGGLE_REF
       </label>
-      <label class="row"><span><b>No background preloading</b><small>Sites can't load pages you haven't clicked yet, and Goatr doesn't open early connections. Pages may open a little slower. <em class="restart" data-restart="prefetch" hidden>Restart Goatr to apply fully.</em></small></span>
+      <label class="row"><span><b>No background preloading</b><small>Sites can't load pages you haven't clicked yet, and Goat doesn't open early connections. Pages may open a little slower. <em class="restart" data-restart="prefetch" hidden>Restart Goat to apply fully.</em></small></span>
         TOGGLE_PREFETCH
       </label>
       <label class="row"><span><b>Block fonts from other sites</b><small>Stops font services (like Google Fonts) from seeing which sites you visit. Some icons may show as boxes; pause the ad blocker on a site to allow them there.</small></span>
         TOGGLE_FONTS
       </label>
-      <div class="row"><span><b>Private tabs</b><small>Cookies and site data stay in memory and are deleted when Goatr closes. Extensions are off. Ctrl+Shift+N.</small></span></div>
+      <div class="row"><span><b>Private tabs</b><small>Cookies and site data stay in memory and are deleted when Goat closes. Extensions are off. Ctrl+Shift+N.</small></span></div>
       <div class="row"><span><b>Always on</b><small>Global Privacy Control and Do Not Track are sent to every site, WebRTC can't leak your IP address, and Edge's tracking prevention is set to Balanced.</small></span></div>
     </div>
   </section>
@@ -1194,10 +1194,10 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <section id="cookies">
     <h2>Cookies</h2>
     <div class="card">
-      <label class="row"><span><b>Block third-party cookies</b><small>Stops trackers that follow you across sites. Some embedded logins may need this off. <em class="restart" data-restart="cookies" hidden>Restart Goatr to apply fully.</em></small></span>
+      <label class="row"><span><b>Block third-party cookies</b><small>Stops trackers that follow you across sites. Some embedded logins may need this off. <em class="restart" data-restart="cookies" hidden>Restart Goat to apply fully.</em></small></span>
         TOGGLE_3PC
       </label>
-      <label class="row"><span><b>Delete cookies when Goatr closes</b><small>Signs you out of sites on every exit.</small></span>
+      <label class="row"><span><b>Delete cookies when Goat closes</b><small>Signs you out of sites on every exit.</small></span>
         TOGGLE_CLEAR
       </label>
     </div>
@@ -1209,32 +1209,32 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <div class="toolbar">
         <button class="primary" onclick="location.href='https://chromewebstore.google.com/category/extensions'">Get extensions from Chrome Web Store</button>
         <button onclick="api('extensions/open_folder')">Open extensions folder</button>
-        <button id="restart" hidden onclick="api('restart')">Restart Goatr</button>
+        <button id="restart" hidden onclick="api('restart')">Restart Goat</button>
         <span class="saved" id="extmsg"></span>
       </div>
       <form class="storeform" id="storeform"><input id="storeurl" placeholder="Paste a Chrome Web Store or Edge Add-ons link" spellcheck="false"><button>Add</button></form>
       <div class="extlist">EXTS</div>
-      <p class="hint">On an extension's store page, click “Add to Goatr” in the address bar. New extensions turn on after a restart. Ad blockers, password managers, dark mode and other page extensions work; extension toolbar buttons and pop-ups aren't available.</p>
+      <p class="hint">On an extension's store page, click “Add to Goat” in the address bar. New extensions turn on after a restart. Ad blockers, password managers, dark mode and other page extensions work; extension toolbar buttons and pop-ups aren't available.</p>
     </div>
   </section>
 
   <section id="performance">
     <h2>Performance</h2>
     <div class="card">
-      <label class="row"><span><b>CPU cores</b><small>How many of your THREADS processor threads Goatr may use. Fewer leaves more for games and other apps; all is fastest for Goatr. <em class="restart" data-restart="cpu" hidden>Applies now to Goatr; pages pick it up after a restart.</em></small></span>
+      <label class="row"><span><b>CPU cores</b><small>How many of your THREADS processor threads Goat may use. Fewer leaves more for games and other apps; all is fastest for Goat. <em class="restart" data-restart="cpu" hidden>Applies now to Goat; pages pick it up after a restart.</em></small></span>
         <select data-key="cpu_cores" data-number="1" data-restartkey="cpu">COREOPTS</select>
       </label>
-      <label class="row"><span><b>Priority</b><small>Higher priority makes Windows run Goatr first when the PC is busy.</small></span>
+      <label class="row"><span><b>Priority</b><small>Higher priority makes Windows run Goat first when the PC is busy.</small></span>
         <select data-key="cpu_priority" data-restartkey="cpu">
           <option value="normal" PRIO_NORMAL>Normal</option>
           <option value="above" PRIO_ABOVE>Above normal</option>
           <option value="high" PRIO_HIGH>High</option>
         </select>
       </label>
-      <label class="row"><span><b>Hardware acceleration</b><small>Pages, video and scrolling use your graphics card. Turn off if pages flicker, go black or crash. <em class="restart" data-restart="gpu" hidden>Restart Goatr to apply.</em></small></span>
+      <label class="row"><span><b>Hardware acceleration</b><small>Pages, video and scrolling use your graphics card. Turn off if pages flicker, go black or crash. <em class="restart" data-restart="gpu" hidden>Restart Goat to apply.</em></small></span>
         TOGGLE_GPU
       </label>
-      <label class="row"><span><b>Audio for streaming</b><small>Plays page sound from Goatr itself, so Discord and other streaming apps pick it up when you share the Goatr window. Experimental.</small></span>
+      <label class="row"><span><b>Audio for streaming</b><small>Plays page sound from Goat itself, so Discord and other streaming apps pick it up when you share the Goat window. Experimental.</small></span>
         TOGGLE_STREAMAUDIO
       </label>
       <label class="row"><span><b>Memory saver</b><small>Background tabs you haven't used for a while free most of their memory. They come back when you open them.</small></span>
@@ -1247,7 +1247,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <h2>Proxy</h2>
     <div class="card">
       <div class="row col">
-        <span><b>Connection</b><small>Normal and private tabs. Tor tabs always use Tor. <em class="restart" data-restart="proxy" hidden>Restart Goatr to apply.</em></small></span>
+        <span><b>Connection</b><small>Normal and private tabs. Tor tabs always use Tor. <em class="restart" data-restart="proxy" hidden>Restart Goat to apply.</em></small></span>
         <div class="radios">
           PX_SYSTEM
           PX_NONE
@@ -1269,7 +1269,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         <span><b>Status</b>TORSTATE</span>
         <span class="dnsbtns"><button type="button" onclick="api('tor/open')">New Tor tab</button></span>
       </div>
-      <p class="hint">Tor tabs (Alt+Shift+N) go through the Tor network and hide your IP. The first time, Goatr downloads the official Tor Expert Bundle from torproject.org. Tor hides your IP, but it isn't Tor Browser: logging in to sites still identifies you.</p>
+      <p class="hint">Tor tabs (Alt+Shift+N) go through the Tor network and hide your IP. The first time, Goat downloads the official Tor Expert Bundle from torproject.org. Tor hides your IP, but it isn't Tor Browser: logging in to sites still identifies you.</p>
     </div>
   </section>
 
@@ -1286,9 +1286,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <section id="about">
     <h2>About</h2>
     <div class="card">
-      <div class="row"><span><b>Goatr VERSION</b><small>A browser written in Rust: the interface is native Rust (egui), pages render with Microsoft Edge WebView2, ads are blocked by Brave's adblock-rust engine.</small></span></div>
-      <div class="row"><span><b>Your data</b><small>Settings, bookmarks and history are in <code>data</code>, cookies and logins in <code>profile</code>, next to Goatr.exe. Crash reports go to <code>data\crash.log</code>.</small></span>
-        <button onclick="api('restart')">Restart Goatr</button></div>
+      <div class="row"><span><b>Goat VERSION</b><small>A browser written in Rust: the interface is native Rust (egui), pages render with Microsoft Edge WebView2, ads are blocked by Brave's adblock-rust engine.</small></span></div>
+      <div class="row"><span><b>Your data</b><small>Settings, bookmarks and history are in <code>data</code>, cookies and logins in <code>profile</code>, next to Goat.exe. Crash reports go to <code>data\crash.log</code>.</small></span>
+        <button onclick="api('restart')">Restart Goat</button></div>
     </div>
   </section>
 </div>
@@ -1421,7 +1421,7 @@ async function privext(folder, on) {
 async function rmext(folder) {
   if (!confirm('Remove this extension?')) return;
   await api('extensions/remove', {title: folder});
-  $('extmsg').textContent = 'Removed. Restart Goatr to finish.'; $('restart').hidden = false;
+  $('extmsg').textContent = 'Removed. Restart Goat to finish.'; $('restart').hidden = false;
   setTimeout(() => location.reload(), 900);
 }
 // Highlight the section you're looking at in the side menu.
@@ -1530,7 +1530,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("FP_OFF", &radio("fp", "fingerprint", "off", &st.fingerprint, "Off", ""))
         .replace("FP_STD", &radio("fp", "fingerprint", "standard", &st.fingerprint, "Standard", "Reports common hardware and GPU values, hides exact OS and CPU details. Recommended."))
         .replace("FP_STRICT", &radio("fp", "fingerprint", "strict", &st.fingerprint, "Strict", "Also adds tiny per-site noise to canvas and audio readouts. Rarely, image editors or games may misbehave."))
-        .replace("WA_ASK", &radio("wa", "webauthn", "ask", &st.webauthn, "Ask first", "Goatr asks before a site can open the Windows passkey dialog, and stops sites from opening it by themselves. Recommended."))
+        .replace("WA_ASK", &radio("wa", "webauthn", "ask", &st.webauthn, "Ask first", "Goat asks before a site can open the Windows passkey dialog, and stops sites from opening it by themselves. Recommended."))
         .replace("WA_ALLOW", &radio("wa", "webauthn", "allow", &st.webauthn, "Allow", "Sites use passkeys and security keys like in Chrome."))
         .replace("WA_BLOCK", &radio("wa", "webauthn", "block", &st.webauthn, "Block", "Never use passkeys or security keys. Sites fall back to passwords or codes."))
         .replace("TOGGLE_STRIP", &toggle("strip_tracking", st.strip_tracking))

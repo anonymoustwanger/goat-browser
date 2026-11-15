@@ -7,7 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Building Goatr ^(release^)... first build takes a few minutes.
+echo Building Goat ^(release^)... first build takes a few minutes.
 cargo build --release
 if errorlevel 1 (
   echo.
@@ -15,7 +15,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-copy /y "target\release\goatr.exe" "Goatr.exe" >nul
+copy /y "target\release\goat.exe" "Goat.exe" >nul
 echo.
-echo Done: %~dp0Goatr.exe
-start "" "%~dp0Goatr.exe"
+echo Done: %~dp0Goat.exe
+start "" "%~dp0Goat.exe"

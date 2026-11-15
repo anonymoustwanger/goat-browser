@@ -1,4 +1,4 @@
-// Goatr — a web browser written in Rust.
+// Goat — a web browser written in Rust.
 //
 // The browser UI (tab strip, toolbar, address bar, bookmarks bar, menus, ad-blocker panel…) is drawn
 // natively in Rust with egui. Web pages are shown by Microsoft Edge WebView2 (via wry), which runs
@@ -47,7 +47,7 @@ use store::Store;
 /// YouTube ad removal (its ads come with the video data, so address blocking can't stop them).
 const YOUTUBE_JS: &str = include_str!("youtube.js");
 const INJECT_JS: &str = include_str!("inject.js");
-/// Per-tab volume (Goatr's speaker button).
+/// Per-tab volume (Goat's speaker button).
 const VOLUME_JS: &str = include_str!("volume.js");
 
 /// Where the built-in goatr:// pages live inside the webview.
@@ -198,7 +198,7 @@ pub enum Cmd {
 }
 
 /// Normal tabs use the saved profile. Private tabs share an in-memory session that's wiped when
-/// Goatr closes; Tor tabs do too, and route everything through Tor. Neither keeps history.
+/// Goat closes; Tor tabs do too, and route everything through Tor. Neither keeps history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabKind {
     Normal,
@@ -314,7 +314,7 @@ pub struct App {
     pub addr_refocus: bool,
     /// The zoom bubble closes itself after this time unless the pointer is on it.
     pub zoom_bubble_until: f64,
-    /// What was right-clicked, while Goatr's page menu is open.
+    /// What was right-clicked, while Goat's page menu is open.
     pub page_menu: Option<shared::PageMenu>,
     /// This window's profile logo (emoji or letter, colour), shown only when there's more than
     /// one profile. Refreshed every few seconds and when settings change.
@@ -327,7 +327,7 @@ pub struct App {
     pub profile_always: bool,
     /// The Tor circuit panel's contents (filled in by a background lookup).
     pub tor_circuit: Arc<Mutex<TorCircuitView>>,
-    /// Page sound played from Goatr.exe for Discord (experimental).
+    /// Page sound played from Goat.exe for Discord (experimental).
     #[cfg(windows)]
     relay: Option<audiorelay::Relay>,
     last_cpu: f64,
@@ -350,7 +350,7 @@ pub struct App {
     pub popup_ready_for: Option<Popup>,
     pub popup_ready: bool,
     start_url: Option<String>,
-    /// Normal, private or Tor window (each is its own Goatr process).
+    /// Normal, private or Tor window (each is its own Goat process).
     pub window_kind: TabKind,
     // address bar
     pub addr: String,
@@ -371,7 +371,7 @@ pub struct App {
     pub popup_born: f64,
     /// Frames a pop-up has been drawn while visible (it stays transparent for the first two).
     pub popup_vis_frames: u32,
-    /// Window background (theme colour), so nothing flashes black before Goatr draws.
+    /// Window background (theme colour), so nothing flashes black before Goat draws.
     pub clear: [f32; 4],
     pub toast: Option<Toast>,
     pub fullscreen: bool,
@@ -423,11 +423,11 @@ fn main() -> eframe::Result<()> {
     #[cfg(windows)]
     {
         let id = match (launch.window.as_str(), launch.profile.as_str()) {
-            ("private", _) => Some("Goatr.Private".to_string()),
-            ("tor", _) => Some("Goatr.Tor".to_string()),
-            ("nogpu", _) => Some("Goatr.NoGPU".to_string()),
+            ("private", _) => Some("Goat.Private".to_string()),
+            ("tor", _) => Some("Goat.Tor".to_string()),
+            ("nogpu", _) => Some("Goat.NoGPU".to_string()),
             (_, "") => None,
-            (_, p) => Some(format!("Goatr.Profile.{}", p.replace(' ', "_"))),
+            (_, p) => Some(format!("Goat.Profile.{}", p.replace(' ', "_"))),
         };
         if let Some(id) = id {
             unsafe {
@@ -441,7 +441,7 @@ fn main() -> eframe::Result<()> {
         _ => TabKind::Normal,
     };
     // Private and Tor windows don't save anything back.
-    // (A no-hardware-acceleration window is a second Goatr process: it reads your settings and
+    // (A no-hardware-acceleration window is a second Goat process: it reads your settings and
     // bookmarks but leaves saving them to the main window.)
     store::READ_ONLY.store(window_kind != TabKind::Normal || store::no_gpu_window(), Ordering::Relaxed);
     let store = Store::load();
@@ -451,16 +451,16 @@ fn main() -> eframe::Result<()> {
 
     let viewport = egui::ViewportBuilder::default()
         .with_title(match (window_kind, launch.profile.as_str()) {
-            (TabKind::Private, _) => "Goatr — Private window".to_string(),
-            (TabKind::Tor, _) => "Goatr — Tor window".to_string(),
-            (_, "") if store::no_gpu_window() => "Goatr — No hardware acceleration".to_string(),
-            (_, "") => "Goatr".to_string(),
-            (_, p) => format!("Goatr — {p}"),
+            (TabKind::Private, _) => "Goat — Private window".to_string(),
+            (TabKind::Tor, _) => "Goat — Tor window".to_string(),
+            (_, "") if store::no_gpu_window() => "Goat — No hardware acceleration".to_string(),
+            (_, "") => "Goat".to_string(),
+            (_, p) => format!("Goat — {p}"),
         })
-        .with_app_id("goatr")
+        .with_app_id("goat")
         .with_decorations(false)
         // The GPU surface format is picked from this window, and pop-ups need one with
-        // transparency to be see-through. Goatr paints its own background, so this looks the same.
+        // transparency to be see-through. Goat paints its own background, so this looks the same.
         .with_transparent(true)
         .with_inner_size([1300.0, 860.0])
         .with_min_inner_size([520.0, 320.0])
@@ -472,12 +472,12 @@ fn main() -> eframe::Result<()> {
     options.glow_options.vsync = !cfg!(windows);
 
     let result = eframe::run_native(
-        "Goatr",
+        "Goat",
         options,
         Box::new(move |cc| {
             let (tx, rx) = channel::<Ev>();
             let ctx = cc.egui_ctx.clone();
-            // Ctrl +/− zooms the page, not Goatr's own UI.
+            // Ctrl +/− zooms the page, not Goat's own UI.
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
             let fonts_ok = chrome::install_fonts(&ctx);
             let sh = {
@@ -502,7 +502,7 @@ fn main() -> eframe::Result<()> {
                 crashlog::set_probe(move || c.request_repaint());
             }
             let _ = std::fs::create_dir_all(extinstall::ext_dir());
-            // Extension tabs open in Goatr (must run before extensions load).
+            // Extension tabs open in Goat (must run before extensions load).
             if window_kind == TabKind::Normal {
                 exthost::start(sh.clone());
             }
@@ -710,7 +710,7 @@ pub fn ext_popup_rect(anchor: egui::Rect, w: f32, h: f32, content: egui::Rect) -
     egui::Rect::from_min_size(egui::pos2(x, content.top() + 4.0), egui::vec2(w, h))
 }
 
-/// In Goatr an extension's pop-up is its own little browser, so "the active tab" would be the
+/// In Goat an extension's pop-up is its own little browser, so "the active tab" would be the
 /// pop-up itself. This makes tabs.query({active: true, currentWindow: true}) answer with the page
 /// you're looking at, and window.close() close the pop-up.
 fn ext_popup_shim(active_url: &str) -> String {
@@ -931,7 +931,7 @@ impl App {
             })
             .with_navigation_handler(move |url| {
                 let _g = crashlog::Scope::new("navigation check");
-                // edge://… and chrome://… pages (e.g. an extension's "Manage" link): Goatr's own page.
+                // edge://… and chrome://… pages (e.g. an extension's "Manage" link): Goat's own page.
                 let lower = url.to_lowercase();
                 if lower.starts_with("edge://") || lower.starts_with("chrome://") {
                     if let Some(u) = pages::browser_page(&url) {
@@ -1190,8 +1190,8 @@ impl App {
         }
     }
 
-    /// Start a fresh copy of Goatr (after this one has closed) and exit.
-    /// Start another Goatr window (a separate process): private/Tor and/or another profile.
+    /// Start a fresh copy of Goat (after this one has closed) and exit.
+    /// Start another Goat window (a separate process): private/Tor and/or another profile.
     pub fn spawn_window(&mut self, window: Option<&str>, profile: Option<&str>, url: Option<&str>) {
         let Ok(exe) = std::env::current_exe() else { return };
         let mut cmd = std::process::Command::new(exe);
@@ -1253,7 +1253,7 @@ impl App {
         }
         match ev {
             Ev::NewTab(url, kind) => {
-                // Extensions open "new tab" as chrome-search://local-ntp or chrome://newtab: use Goatr's.
+                // Extensions open "new tab" as chrome-search://local-ntp or chrome://newtab: use Goat's.
                 let l = url.to_lowercase();
                 let url = if url.is_empty() || l.starts_with("chrome-search:") || l.starts_with("chrome://newtab") || l.starts_with("edge://newtab") || l == "about:newtab" {
                     format!("{INTERNAL_BASE}/newtab")
@@ -1359,7 +1359,7 @@ impl App {
                     }
                 }
                 self.toast(match kind {
-                    "unresponsive" => "This page stopped responding, so Goatr reloaded it".to_string(),
+                    "unresponsive" => "This page stopped responding, so Goat reloaded it".to_string(),
                     k => format!("Page problem ({k}), reloading"),
                 });
             }
@@ -1370,7 +1370,7 @@ impl App {
                     t.title = if title.trim().is_empty() { display_url(&t.url) } else { title };
                     let (u, ti, tor) = (t.url.clone(), t.title.clone(), t.kind.is_private_like());
                     if i == self.active {
-                        self.ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{ti} - Goatr")));
+                        self.ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{ti} - Goat")));
                     }
                     if !tor && u.starts_with("http") && !u.starts_with(INTERNAL_BASE) {
                         self.sh.store.lock().unwrap().update_title(&u, &ti);
@@ -1381,7 +1381,7 @@ impl App {
                 if done {
                     self.show_painted(id);
                 }
-                // Goatr's own pages get the theme colour behind them (no white flash);
+                // Goat's own pages get the theme colour behind them (no white flash);
                 // websites get white, like every browser, for pages with no background of their own.
                 if done {
                     if let Some(i) = self.tab_index(id) {
@@ -1528,7 +1528,7 @@ impl App {
                     if active {
                         self.ext_popup = None;
                     }
-                    let _ = popup; // Goatr shows extension windows as tabs.
+                    let _ = popup; // Goat shows extension windows as tabs.
                     cmds.push(Cmd::ExtTab(url, active));
                 }
             },
@@ -1538,7 +1538,7 @@ impl App {
     // ------------------------------------------------------------------ commands
 
     pub fn run(&mut self, cmd: Cmd, frame: &eframe::Frame) {
-        if std::env::var("GOATR_DEBUG").is_ok() {
+        if std::env::var("GOAT_DEBUG").is_ok() {
             eprintln!("cmd: {cmd:?}");
         }
         crashlog::note(format!("{cmd:?}"));
@@ -1634,7 +1634,7 @@ impl App {
                 if matches!(self.popup, Some((Popup::TorCircuit, _))) {
                     self.popup = None;
                 } else {
-                    // Goatr's own pages (like the Tor start page) don't go through Tor: no circuit.
+                    // Goat's own pages (like the Tor start page) don't go through Tor: no circuit.
                     let host = self
                         .active_tab()
                         .filter(|t| t.url.starts_with("http") && !t.url.starts_with(INTERNAL_BASE) && !t.url.contains("goatr.localhost"))
@@ -1643,7 +1643,7 @@ impl App {
                     *self.tor_circuit.lock().unwrap() = TorCircuitView { host: host.clone(), loading: true, ..Default::default() };
                     let (view, tor, c) = (self.tor_circuit.clone(), self.sh.tor.clone(), self.ctx.clone());
                     std::thread::spawn(move || {
-                        let r = if host.is_empty() { Err("This is one of Goatr's own pages, which don't go through Tor. Open a website in this tab to see the relays it uses.".to_string()) } else { tor.circuit_for(&host) };
+                        let r = if host.is_empty() { Err("This is one of Goat's own pages, which don't go through Tor. Open a website in this tab to see the relays it uses.".to_string()) } else { tor.circuit_for(&host) };
                         let mut v = view.lock().unwrap();
                         v.loading = false;
                         match r {
@@ -1675,7 +1675,7 @@ impl App {
                 self.mutate_settings(|s| s.discord_audio = on);
                 self.apply_discord_audio();
                 self.toast(if on {
-                    "Page sound now plays from Goatr, so streaming apps can pick it up (experimental)"
+                    "Page sound now plays from Goat, so streaming apps can pick it up (experimental)"
                 } else {
                     "Audio for streaming is off"
                 });
@@ -1906,7 +1906,7 @@ impl App {
                         self.toast(format!("Couldn't open options: {e}"));
                     }
                 } else {
-                    self.toast("This extension isn't ready yet. Restart Goatr after installing.");
+                    self.toast("This extension isn't ready yet. Restart Goat after installing.");
                 }
             }
             Cmd::ExtPin(folder) => {
@@ -1998,7 +1998,7 @@ impl App {
                 self.toast("This extension has no toolbar pop-up.");
                 return;
             }
-            // Goatr hasn't asked WebView2 for its extension list yet: ask, then open.
+            // Goat hasn't asked WebView2 for its extension list yet: ask, then open.
             if !self.ext_ids_known {
                 self.ext_retry = Some((folder.to_string(), anchor));
                 self.last_ext_query = -100.0;
@@ -2361,13 +2361,13 @@ impl eframe::App for App {
             #[cfg(windows)]
             winhooks::finish_context_menu(None);
         }
-        // A press anywhere in Goatr's own UI (address bar included) closes the zoom bubble.
+        // A press anywhere in Goat's own UI (address bar included) closes the zoom bubble.
         if matches!(self.popup, Some((Popup::Zoom, _))) && ui.ctx().input(|i| i.pointer.any_pressed()) {
             self.popup = None;
             let t = now(ui.ctx());
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("zoom-closed-at"), t));
         }
-        // A press anywhere in Goatr's own UI closes an open extension pop-up.
+        // A press anywhere in Goat's own UI closes an open extension pop-up.
         if self.ext_popup.is_some() && ui.ctx().input(|i| i.pointer.any_pressed()) {
             let folder = self.ext_popup.take().map(|p| p.1).unwrap_or_default();
             self.ext_closed = Some((folder, now(ui.ctx())));
@@ -2427,7 +2427,7 @@ impl eframe::App for App {
             let el = start.elapsed().as_secs_f32();
             if el >= 2.0 {
                 if *n as f32 / el > 20.0 {
-                    crashlog::debug(format!("frames: {:.0} fps (screen {} Hz), Goatr's work per frame avg {:.1} ms, max {:.1} ms", *n as f32 / el, self.refresh_hz, *sum / *n as f32, *max));
+                    crashlog::debug(format!("frames: {:.0} fps (screen {} Hz), Goat's work per frame avg {:.1} ms, max {:.1} ms", *n as f32 / el, self.refresh_hz, *sum / *n as f32, *max));
                 }
                 self.frame_stats = (std::time::Instant::now(), 0, 0.0, 0.0);
             }

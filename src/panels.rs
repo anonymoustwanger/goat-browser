@@ -23,7 +23,7 @@ const PAD_X: f32 = 16.0;
 const PAD_TOP: f32 = 16.0;
 const PAD_BOTTOM: f32 = 20.0;
 
-/// Goatr's main window, so pop-ups can belong to it.
+/// Goat's main window, so pop-ups can belong to it.
 pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 /// Ask Windows 11 for rounded corners on a pop-up window (found by its unique title).
@@ -55,7 +55,7 @@ fn prepare_window(title: &str) {
     round_corners(title);
     unsafe {
         if let Ok(hwnd) = FindWindowW(None, &HSTRING::from(title)) {
-            // Owned by Goatr's window: stays above Goatr, but not above other apps.
+            // Owned by Goat's window: stays above Goat, but not above other apps.
             let owner = MAIN_HWND.load(std::sync::atomic::Ordering::Relaxed);
             if owner != 0 {
                 SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner);
@@ -248,7 +248,7 @@ impl App {
             Popup::ExtConfirm | Popup::AppLink => pos2(at.x - win.x / 2.0, at.y + 6.0 - PAD_TOP),
             _ => pos2(at.x - PAD_X + 2.0, at.y - PAD_TOP + 2.0),
         };
-        // Keep the whole pop-up inside Goatr's window (and the screen).
+        // Keep the whole pop-up inside Goat's window (and the screen).
         let bounds = ctx
             .input(|i| i.viewport().inner_rect)
             .unwrap_or(Rect::from_min_size(Pos2::ZERO, ctx.input(|i| i.viewport().monitor_size).unwrap_or(vec2(1920.0, 1080.0))));
@@ -271,7 +271,7 @@ impl App {
             Popup::Volume => "volume",
             Popup::TorCircuit => "torcircuit",
         };
-        let title = format!("Goatr pop-up {name}");
+        let title = format!("Goat pop-up {name}");
         let vid = ViewportId::from_hash_of(match popup {
             Popup::Menu => "menu",
             Popup::Shield => "shield",
@@ -307,7 +307,7 @@ impl App {
             .with_position(pos)
             .with_inner_size(win)
             .with_visible(shown);
-        // Windows keeps pop-ups above Goatr by making Goatr their owner (see prepare_window).
+        // Windows keeps pop-ups above Goat by making Goat their owner (see prepare_window).
         #[cfg(not(windows))]
         let builder = builder.with_always_on_top();
 
@@ -346,7 +346,7 @@ impl App {
                 if t > self.zoom_bubble_until {
                     close = true;
                 } else {
-                    // Immediate pop-ups only redraw with Goatr's window, so wake that.
+                    // Immediate pop-ups only redraw with Goat's window, so wake that.
                     pctx.request_repaint_after_for(std::time::Duration::from_millis(100), egui::ViewportId::ROOT);
                 }
             }
@@ -361,7 +361,7 @@ impl App {
                     _ => {}
                 }
                 // A click into the page or another app only reaches this pop-up's window, and
-                // pop-ups are drawn with Goatr's window: keep that drawing so it notices at once.
+                // pop-ups are drawn with Goat's window: keep that drawing so it notices at once.
                 pctx.request_repaint_after_for(std::time::Duration::from_millis(30), egui::ViewportId::ROOT);
                 // If the window never got focus (e.g. the click went elsewhere), don't linger.
                 if !self.popup_had_focus && now(&pctx) - born > 1.5 {
@@ -516,7 +516,7 @@ impl App {
         }
     }
 
-    /// Goatr's right-click menu for pages: Goat's look, with the engine doing copy/paste/save.
+    /// Goat's right-click menu for pages: Goat's look, with the engine doing copy/paste/save.
     fn page_menu_rows(&self) -> Vec<Row> {
         let Some(m) = self.page_menu.clone() else { return vec![] };
         let mut rows: Vec<Row> = Vec::new();
@@ -846,7 +846,7 @@ impl App {
             Row::Sep,
             Row::Item(item(icons::USER, "Profiles", "", Cmd::OpenPage("settings#profiles"))),
             Row::Item(item(icons::COG, "Settings", "Ctrl+,", Cmd::OpenPage("settings"))),
-            Row::Item(item(icons::INFO, &format!("About Goatr   v{}", env!("CARGO_PKG_VERSION")), "", Cmd::OpenPage("settings"))),
+            Row::Item(item(icons::INFO, &format!("About Goat   v{}", env!("CARGO_PKG_VERSION")), "", Cmd::OpenPage("settings"))),
             Row::Item(quit),
         ]
     }
@@ -1046,7 +1046,7 @@ impl App {
         }
         let badge_icon = if grey { icons::SHIELD } else { icons::SHIELD_TICK };
         icons::draw(&bp, Rect::from_center_size(badge.center(), Vec2::splat(26.0)), badge_icon, pal.ink, 1.8);
-        pr.text(pos2(badge.right() + 12.0, head.top() + 26.0), Align2::LEFT_CENTER, "Goatr Shield", bold(15.0), pal.text);
+        pr.text(pos2(badge.right() + 12.0, head.top() + 26.0), Align2::LEFT_CENTER, "Goat Shield", bold(15.0), pal.text);
         let status = if !on {
             "Off everywhere".to_string()
         } else if !ab.ready() {
@@ -1204,7 +1204,7 @@ impl App {
                 p.rect_filled(b, 10, alpha(Color32::WHITE, 0.10));
             }
             icons::draw(p, Rect::from_min_size(pos2(b.left() + 14.0, b.center().y - 8.0), Vec2::splat(16.0)), icons::PUZZLE, pal.ink, 1.5);
-            p.text(pos2(b.left() + 40.0, b.center().y), Align2::LEFT_CENTER, "Add this extension to Goatr", bold(13.0), pal.ink);
+            p.text(pos2(b.left() + 40.0, b.center().y), Align2::LEFT_CENTER, "Add this extension to Goat", bold(13.0), pal.ink);
             if resp.clicked() {
                 cmds.push(Cmd::InstallExtension);
             }

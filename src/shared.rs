@@ -80,7 +80,7 @@ pub fn test_shared() -> Arc<Shared> {
     })
 }
 
-/// What was right-clicked in a page, for Goatr's own context menu.
+/// What was right-clicked in a page, for Goat's own context menu.
 #[derive(Debug, Clone, Default)]
 pub struct PageMenu {
     pub link: String,

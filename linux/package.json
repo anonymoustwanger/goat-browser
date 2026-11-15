@@ -1,12 +1,12 @@
 {
-  "name": "goatr",
+  "name": "goat",
   "version": "1.0.0",
-  "description": "Goatr: private, fast browser (Linux edition, built on Electron)",
+  "description": "Goat: private, fast browser (Linux edition, built on Electron)",
   "main": "src/main.js",
   "scripts": {
     "start": "npm run build && electron .",
     "build": "esbuild src/ui/preload.js --bundle --platform=node --format=cjs --external:electron --outfile=src/ui/preload.bundle.js",
-    "package:linux": "npm run build && electron-packager . Goatr --platform=linux --arch=x64 --out=dist --overwrite --asar --ignore=^/dist --ignore=^/build --ignore=^/installer --executable-name=goatr",
+    "package:linux": "npm run build && electron-packager . Goat --platform=linux --arch=x64 --out=dist --overwrite --asar --ignore=^/dist --ignore=^/build --ignore=^/installer --executable-name=goat",
     "appimage": "npm run package:linux && sh installer/linux/build-appimage.sh",
     "tar": "npm run package:linux && sh installer/linux/build-tar.sh"
   },
@@ -21,5 +21,5 @@
     "openpgp": "^6.3.2",
     "tldts": "^7.4.19"
   },
-  "productName": "Goatr"
+  "productName": "Goat"
 }

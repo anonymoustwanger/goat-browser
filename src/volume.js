@@ -1,4 +1,4 @@
-// Goatr: per-tab volume (0–600%), set from Goatr's speaker button.
+// Goat: per-tab volume (0–600%), set from Goat's speaker button.
 // Media goes through a Web Audio gain, so the page's own volume slider still works on top.
 // Media from another site without CORS can't go through Web Audio (it would play silent), so it
 // only has its volume turned down (never boosted).

@@ -4,7 +4,7 @@ if (process.argv.some((a) => a === '--goat-setup' || a === '--goat-uninstall' ||
   require('./setup');
   return; // CommonJS module: stop here
 }
-// Goatr — a private, fast browser built on Chromium (via Electron).
+// Goat — a private, fast browser built on Chromium (via Electron).
 // Cookies and site data persist in the profile; trackers, ads and third-party
 // cookies are blocked; DNS goes over HTTPS; http:// is upgraded; sites must ask
 // for devices. Settings: goat://settings (ad blocker, cookies, proxy, general).
@@ -25,8 +25,14 @@ const { Translator, LANGUAGES, acceptLanguage, sameLang } = require('./translate
 
 // ------------------------------------------------------------------- profiles
 // Local profiles: each has its own cookies, history, bookmarks, extensions and settings,
-// in %APPDATA%\Goatr\Profiles\<id>, and runs as its own Goatr process
-// (--goat-profile=<id>). The default profile is %APPDATA%\Goatr itself.
+// in %APPDATA%\Goat\Profiles\<id>, and runs as its own Goat process
+// (--goat-profile=<id>). The default profile is %APPDATA%\Goat itself.
+// Data from when the browser was called Goatr moves to the new name.
+try {
+  const appData = app.getPath('appData');
+  const prev = path.join(appData, 'Goatr');
+  if (!fs.existsSync(path.join(appData, 'Goat')) && fs.existsSync(prev)) fs.renameSync(prev, path.join(appData, 'Goat'));
+} catch { /* keep going with a fresh profile */ }
 const ROOT_DIR = app.getPath('userData');
 const PROFILE = (() => {
   const a = process.argv.find((x) => x.startsWith('--goat-profile='));
@@ -75,7 +81,7 @@ function openProfile(id) {
 }
 
 // ---------------------------------------------------------------- window mode
-// Private and Tor windows run as their own Goatr process with a throwaway Chromium
+// Private and Tor windows run as their own Goat process with a throwaway Chromium
 // profile in %TEMP%. They read your settings, bookmarks and blocklists from the
 // main profile but never write history, tabs, cookies or settings back.
 const MODE = (() => {
@@ -190,7 +196,7 @@ const DEFAULT_SETTINGS = {
     forgetSites: [], // cookies + storage deleted when the site's last tab closes
   },
   tor: { enabled: false, showButton: false },
-  updates: { auto: true, lastCheck: 0, skip: '' }, // auto: check GitHub for a new Goatr once a day // showButton: Tor on/off button in the toolbar
+  updates: { auto: true, lastCheck: 0, skip: '' }, // auto: check GitHub for a new Goat once a day // showButton: Tor on/off button in the toolbar
   // sites: language websites are asked for (Accept-Language, navigator.language).
   // translateTo: language pages are translated into. engine: google | libre.
   languages: { sites: 'en', translateTo: 'en', offer: true, auto: false, engine: 'libre', libreUrl: 'https://libretranslate.com', libreKey: '' },
@@ -313,7 +319,7 @@ function loadSettings() {
   }
   // Older versions had a single on/off switch.
   if (!raw.dns && raw.secureDns === false) settings.dns.provider = 'off';
-  // Themes that no longer exist (e.g. the removed "Goatr" theme) fall back to System.
+  // Themes that no longer exist (e.g. the removed "Goat" theme) fall back to System.
   const th = settings.appearance.theme;
   if (th !== 'system' && !THEMES[th] && !(settings.appearance.customThemes || []).some((c) => c && c.id === th)) settings.appearance.theme = 'system';
 }
@@ -555,7 +561,7 @@ function onBeforeRequest(details, callback) {
 }
 
 // Google refuses sign-in from browsers built on Electron ("This browser or app may not be
-// secure"). On its sign-in pages only, Goatr looks like current Firefox: Firefox's user agent,
+// secure"). On its sign-in pages only, Goat looks like current Firefox: Firefox's user agent,
 // no Chrome client hints, and Firefox-like navigator values (set in fp-preload).
 const GOOGLE_SIGNIN_HOSTS = new Set(['accounts.google.com', 'accounts.youtube.com']);
 function firefoxUA() {
@@ -622,7 +628,7 @@ function onHeadersReceived(details, callback) {
 }
 
 function attachRequestHandlers() {
-  // Only web traffic goes through Goatr's filters; goat://, extension, data: and blob: URLs skip the round trip.
+  // Only web traffic goes through Goat's filters; goat://, extension, data: and blob: URLs skip the round trip.
   const filter = { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] };
   for (const s of allSessions()) {
     s.webRequest.onBeforeRequest(filter, onBeforeRequest);
@@ -888,7 +894,7 @@ function wireExtensionProxy() {
     return undefined;
   });
   extApi().on('extension-unloaded', (_e, ext) => { if (extProxy && extProxy.owner === ext.id) { extProxy = null; applyProxy(); } });
-  // Chrome keeps an extension's proxy across restarts; so does Goatr (only while that extension is installed).
+  // Chrome keeps an extension's proxy across restarts; so does Goat (only while that extension is installed).
   handle('goat.runtime.externalReply', (_ctx, requestId, resp) => {
     const done = pendingExtMsgs.get(requestId);
     if (done) { pendingExtMsgs.delete(requestId); done(resp); }
@@ -1005,7 +1011,7 @@ function wireExtensionDiagnostics() {
   // Native messaging (e.g. iCloud Passwords <-> iCloud for Windows): connection steps and errors only,
   // never message contents (they can contain passwords).
   process.on('goat-debug', (line) => { if (!/\] (receive|send|sending)\b/.test(line)) debugLog(line); });
-  debugLog(`--- Goatr ${require(path.join(__dirname, '..', 'package.json')).version} started; extensions: ${extApi().getAllExtensions().map((e) => extText(e, e.name)).join(', ') || 'none yet'}`);
+  debugLog(`--- Goat ${require(path.join(__dirname, '..', 'package.json')).version} started; extensions: ${extApi().getAllExtensions().map((e) => extText(e, e.name)).join(', ') || 'none yet'}`);
 }
 
 // The VPN extension's servers ask for a login: let the extension answer, as Chrome does.
@@ -1060,7 +1066,7 @@ function onPermissionRequest(wc, permission, callback, details) {
   dialog.showMessageBox(win, {
     type: 'question', buttons: ['Block', 'Allow'], defaultId: 0, cancelId: 0,
     message: `${origin} wants to use your ${what}.`,
-    detail: 'This choice lasts until you close Goatr.',
+    detail: 'This choice lasts until you close Goat.',
   }).then(({ response }) => {
     const ok = response === 1;
     permDecisions.set(key, ok);
@@ -1143,7 +1149,7 @@ function createTab(url, { activate = true, groupId = null, position = 'afterActi
       spellcheck: false, safeDialogs: true, navigateOnDragDrop: true,
     },
   });
-  // Theme color for Goatr's own pages avoids a white flash; web pages get white.
+  // Theme color for Goat's own pages avoids a white flash; web pages get white.
   view.setBackgroundColor(url && /^https?:/i.test(url) ? '#ffffff' : appearance().bg);
   const tab = { id, view, title: '', blocked: 0, groupId: groups.has(groupId) ? groupId : null, lastActive: Date.now(), private: !!isPrivate };
   tabs.set(id, tab);
@@ -1894,7 +1900,7 @@ async function deleteProfile(id) {
   await new Promise((r) => setTimeout(r, 800));
   try { fs.rmSync(profileDir(id), { recursive: true, force: true }); } catch (err) { return { ok: false, error: `Couldn't delete its files: ${err.message}` }; }
   saveProfiles(loadProfiles().filter((p) => p.id !== id));
-  if (process.platform === 'win32') { try { fs.rmSync(path.join(app.getPath('desktop'), `Goatr - ${profileName(id)}.lnk`), { force: true }); } catch { /* none */ } }
+  if (process.platform === 'win32') { try { fs.rmSync(path.join(app.getPath('desktop'), `Goat - ${profileName(id)}.lnk`), { force: true }); } catch { /* none */ } }
   scheduleState();
   return { ok: true };
 }
@@ -1903,8 +1909,8 @@ function profileShortcut(id) {
   if (process.platform !== 'win32') return false;
   const p = loadProfiles().find((x) => x.id === id);
   if (!p) return false;
-  return shell.writeShortcutLink(path.join(app.getPath('desktop'), `Goatr - ${p.name.replace(/[\\/:*?"<>|]/g, '')}.lnk`), 'create', {
-    target: process.execPath, args: profileArgs(id).join(' '), icon: process.execPath, iconIndex: 0, description: `Goatr (${p.name})`,
+  return shell.writeShortcutLink(path.join(app.getPath('desktop'), `Goat - ${p.name.replace(/[\\/:*?"<>|]/g, '')}.lnk`), 'create', {
+    target: process.execPath, args: profileArgs(id).join(' '), icon: process.execPath, iconIndex: 0, description: `Goat (${p.name})`,
     appUserModelId: id === 'default' ? 'com.goat.browser' : `com.goat.browser.profile.${id}`,
   });
 }
@@ -1927,7 +1933,7 @@ function applyTaskbarIdentity() {
     win.setAppDetails({
       appId: APP_ID, appIconPath: process.execPath, appIconIndex: 0,
       relaunchCommand: `"${process.execPath}"${PROFILE === 'default' ? '' : ` --goat-profile=${PROFILE}`}`,
-      relaunchDisplayName: PROFILE === 'default' ? 'Goatr' : `Goatr (${p.name})`,
+      relaunchDisplayName: PROFILE === 'default' ? 'Goat' : `Goat (${p.name})`,
     });
   } catch { /* older Windows */ }
   try { win.setOverlayIcon(many ? profileDot(p.color) : null, many ? `Profile: ${p.name}` : ''); } catch { /* ignore */ }
@@ -1951,12 +1957,12 @@ function profileDot(hex) {
   return nativeImage.createFromBitmap(buf, { width: S, height: S });
 }
 function windowTitle() {
-  const base = { normal: 'Goatr', private: 'Goatr · Private window', tor: 'Goatr · Tor window' }[MODE];
+  const base = { normal: 'Goat', private: 'Goat · Private window', tor: 'Goat · Tor window' }[MODE];
   return PROFILE === 'default' && loadProfiles().length === 1 ? base : `${base} · ${currentProfile().name}`;
 }
 
 // ------------------------------------------------------------------- updates
-// Checks GitHub Releases for a newer Goatr. Windows: downloads the installer and runs it
+// Checks GitHub Releases for a newer Goat. Windows: downloads the installer and runs it
 // (it updates in place and keeps your profile). Linux: opens the download page.
 const RELEASES_API = process.env.GOAT_UPDATE_URL || 'https://api.github.com/repos/anonymoustwanger/goat-browser/releases/latest';
 const RELEASES_PAGE = 'https://github.com/anonymoustwanger/goat-browser/releases/latest';
@@ -1993,7 +1999,7 @@ async function checkForUpdates(manual = false) {
       const isNew = update.version !== version;
       update = { ...update, state: 'available', version, notes: String(rel.body || '').slice(0, 2000), url: rel.html_url || RELEASES_PAGE,
         asset: asset ? { name: asset.name, url: asset.browser_download_url, size: asset.size } : null };
-      if (isNew && !manual && settings.updates.skip !== version) toast(`Goatr ${version} is available. Menu → Update Goatr.`);
+      if (isNew && !manual && settings.updates.skip !== version) toast(`Goat ${version} is available. Menu → Update Goat.`);
     } else update = { ...update, state: 'latest', version: version || APP_VERSION };
   } catch (err) {
     update = { ...update, state: 'error', error: String(err.message || err) };
@@ -2025,7 +2031,7 @@ async function installUpdate() {
     if (update.asset.size && fs.statSync(file).size !== update.asset.size) throw new Error('download was incomplete');
     update = { ...update, state: 'ready', progress: 100 };
     pushUpdate();
-    // The installer closes Goatr itself when you click Update, then updates in place.
+    // The installer closes Goat itself when you click Update, then updates in place.
     require('child_process').spawn(file, [], { detached: true, stdio: 'ignore' }).unref();
   } catch (err) {
     update = { ...update, state: 'error', error: String(err.message || err) };
@@ -2872,7 +2878,7 @@ function wirePagesIpc() {
       type: 'question', buttons: ['Not now', 'Continue'], defaultId: 1, cancelId: 0,
       message: `${host} wants to sign you in with a passkey or security key.`,
       detail: 'Your system will ask for your phone or a USB security key. Choose "Not now" to sign in another way.',
-      checkboxLabel: 'Allow for this site until Goatr closes', checkboxChecked: false,
+      checkboxLabel: 'Allow for this site until Goat closes', checkboxChecked: false,
     }).then(({ response, checkboxChecked }) => {
       const ok = response === 1;
       if (ok && checkboxChecked) webauthnAllowed.set(origin, true);
@@ -2987,7 +2993,7 @@ function wirePagesIpc() {
   ipcMain.handle('goat:uninstall', fromPage('settings', async () => {
     const r = await dialog.showMessageBox(win, {
       type: 'question', buttons: ['Cancel', 'Uninstall…'], defaultId: 0, cancelId: 0,
-      message: 'Uninstall Goatr?', detail: 'Goatr will close and the uninstaller will open. You can choose there whether to keep your profile.',
+      message: 'Uninstall Goat?', detail: 'Goat will close and the uninstaller will open. You can choose there whether to keep your profile.',
     });
     if (r.response !== 1) return false;
     require('child_process').spawn(process.execPath, [...(process.defaultApp ? [process.argv[1]] : []), '--goat-uninstall'], { detached: true, stdio: 'ignore' }).unref();
@@ -3179,7 +3185,7 @@ function createWindow() {
 }
 
 // ------------------------------------------------------------------ lifecycle
-// A web address or a local page Windows asked Goatr to open (default browser, "Open with").
+// A web address or a local page Windows asked Goat to open (default browser, "Open with").
 function launchUrl(argv) {
   for (const a of argv.slice(1)) {
     if (/^https?:\/\//i.test(a)) return a;
@@ -3194,7 +3200,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_e, argv) => {
     if (argv.includes('--goat-quit')) {
-      // The installer or uninstaller needs Goatr closed: save everything and exit.
+      // The installer or uninstaller needs Goat closed: save everything and exit.
       for (const c of windowProcs) { try { c.kill(); } catch { /* gone */ } }
       app.quit();
       return;

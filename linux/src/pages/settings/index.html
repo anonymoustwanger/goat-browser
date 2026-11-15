@@ -11,7 +11,7 @@
 </head>
 <body class="settings">
   <nav class="side">
-    <div class="brand">goatr<span>.</span> settings</div>
+    <div class="brand">goat<span>.</span> settings</div>
     <a href="#general">General</a>
     <a href="#profiles">Profiles</a>
     <a href="#languages">Languages</a>
@@ -88,7 +88,7 @@
     <section id="languages">
       <h2>Languages</h2>
       <div class="card">
-        <label class="row"><span><b>Website language</b><small>The language sites are asked to show. Helps a lot over Tor, where sites otherwise guess from the Tor exit's country. <em class="restart" data-restart="languages.sites" hidden>Restart Goatr to apply everywhere.</em></small></span>
+        <label class="row"><span><b>Website language</b><small>The language sites are asked to show. Helps a lot over Tor, where sites otherwise guess from the Tor exit's country. <em class="restart" data-restart="languages.sites" hidden>Restart Goat to apply everywhere.</em></small></span>
           <select data-key="languages.sites" class="langselect"></select>
         </label>
         <label class="row"><span><b>Translate pages into</b><small>Click the translate button in the address bar, or right-click a page → Translate.</small></span>
@@ -111,7 +111,7 @@
             <label class="wide">API key <input data-key="languages.libreKey" placeholder="optional" spellcheck="false" autocomplete="off"></label>
           </div>
         </div>
-        <p class="hint">Goatr's own menus are in English.</p>
+        <p class="hint">Goat's own menus are in English.</p>
       </div>
     </section>
 
@@ -119,7 +119,7 @@
       <h2>Appearance</h2>
       <div class="card">
         <div class="row col">
-          <span><b>Theme</b><small>Applies to the toolbar, Goatr's own pages, and tells websites to use dark or light mode.</small></span>
+          <span><b>Theme</b><small>Applies to the toolbar, Goat's own pages, and tells websites to use dark or light mode.</small></span>
           <div class="themes" id="themes" role="radiogroup" aria-label="Theme"></div>
         </div>
         <div class="row col" id="editor" hidden>
@@ -171,7 +171,7 @@
       <h2>Privacy</h2>
       <div class="card">
         <div class="row col">
-          <span><b>Profile</b><small>Sets the speed-vs-privacy switches in one click: preloading, keeping sites separate, font blocking, fingerprint protection, ad blocking level and DNS. You can still change any of them below. <em class="restart" id="profrestart" hidden>Restart Goatr to apply fully.</em></small></span>
+          <span><b>Profile</b><small>Sets the speed-vs-privacy switches in one click: preloading, keeping sites separate, font blocking, fingerprint protection, ad blocking level and DNS. You can still change any of them below. <em class="restart" id="profrestart" hidden>Restart Goat to apply fully.</em></small></span>
           <div class="profiles" id="privprofiles" role="radiogroup" aria-label="Settings profile"></div>
         </div>
       </div>
@@ -187,7 +187,7 @@
         <div class="row col">
           <span><b>Passkeys and security keys</b><small>Some sites start a passkey sign-in on their own, which makes your system pop up "use your security key".</small></span>
           <div class="radios">
-            <label><input type="radio" name="wa" value="ask" data-key="privacy.webauthn"> <span><b>Ask first</b><small>Goatr asks before a site can open the system passkey dialog, and stops sites from opening it by themselves. Recommended.</small></span></label>
+            <label><input type="radio" name="wa" value="ask" data-key="privacy.webauthn"> <span><b>Ask first</b><small>Goat asks before a site can open the system passkey dialog, and stops sites from opening it by themselves. Recommended.</small></span></label>
             <label><input type="radio" name="wa" value="allow" data-key="privacy.webauthn"> <span><b>Allow</b><small>Sites use passkeys and security keys like in Chrome.</small></span></label>
             <label><input type="radio" name="wa" value="block" data-key="privacy.webauthn"> <span><b>Block</b><small>Never use passkeys or security keys. Sites fall back to passwords or codes.</small></span></label>
           </div>
@@ -205,13 +205,13 @@
         <label class="row"><span><b>Remove tracking from links</b><small>Strips tags like utm_source, fbclid and gclid from addresses you open.</small></span>
           <input type="checkbox" class="toggle" data-key="privacy.stripTracking">
         </label>
-        <label class="row"><span><b>Keep sites separate</b><small>Each site gets its own storage, cache and connections, so embedded trackers can't recognize you across sites. <em class="restart" data-restart="privacy.isolateSites" hidden>Restart Goatr to apply.</em></small></span>
+        <label class="row"><span><b>Keep sites separate</b><small>Each site gets its own storage, cache and connections, so embedded trackers can't recognize you across sites. <em class="restart" data-restart="privacy.isolateSites" hidden>Restart Goat to apply.</em></small></span>
           <input type="checkbox" class="toggle" data-key="privacy.isolateSites">
         </label>
         <label class="row"><span><b>Trim referrers</b><small>When you open another site, it isn't told which page you came from. Things loaded from other servers only see the site name, not the page.</small></span>
           <input type="checkbox" class="toggle" data-key="privacy.trimReferrers">
         </label>
-        <label class="row"><span><b>No background preloading</b><small>Sites can't load pages you haven't clicked yet, and Goatr doesn't open early connections. Pages may open a little slower. <em class="restart" data-restart="privacy.blockPrefetch" hidden>Restart Goatr to apply fully.</em></small></span>
+        <label class="row"><span><b>No background preloading</b><small>Sites can't load pages you haven't clicked yet, and Goat doesn't open early connections. Pages may open a little slower. <em class="restart" data-restart="privacy.blockPrefetch" hidden>Restart Goat to apply fully.</em></small></span>
           <input type="checkbox" class="toggle" data-key="privacy.blockPrefetch">
         </label>
         <label class="row"><span><b>Block fonts from other sites</b><small>Stops font services (like Google Fonts) from seeing which sites you visit. Some icons may show as boxes; pause the ad blocker on a site to allow them there.</small></span>
@@ -294,7 +294,7 @@
         <label class="row"><span><b>Block third-party cookies</b><small>Stops trackers that follow you across sites. Some embedded logins may need this off.</small></span>
           <input type="checkbox" class="toggle" data-key="cookies.blockThirdParty">
         </label>
-        <label class="row"><span><b>Delete cookies when Goatr closes</b><small>Signs you out of sites on every exit.</small></span>
+        <label class="row"><span><b>Delete cookies when Goat closes</b><small>Signs you out of sites on every exit.</small></span>
           <input type="checkbox" class="toggle" data-key="cookies.clearOnExit">
         </label>
       </div>
@@ -314,7 +314,7 @@
     <section id="tor">
       <h2>Tor</h2>
       <div class="card">
-        <label class="row"><span><b>Route everything through Tor</b><small>Hides your IP address: sites see a Tor address instead. No Tor Browser needed. The first time, Goatr downloads Tor (about 15&nbsp;MB) from torproject.org and checks its signature. Pages are slower, and some sites block Tor or show more captchas. While Tor is connecting or broken, pages don't load at all, so your real IP never leaks.</small></span>
+        <label class="row"><span><b>Route everything through Tor</b><small>Hides your IP address: sites see a Tor address instead. No Tor Browser needed. The first time, Goat downloads Tor (about 15&nbsp;MB) from torproject.org and checks its signature. Pages are slower, and some sites block Tor or show more captchas. While Tor is connecting or broken, pages don't load at all, so your real IP never leaks.</small></span>
           <input type="checkbox" class="toggle" data-key="tor.enabled">
         </label>
         <label class="row"><span><b>Tor button in the toolbar</b><small>A button to turn Tor on and off with one click. It always shows while Tor is on.</small></span>
@@ -380,11 +380,11 @@
           <span class="dnsbtns"><button type="button" id="updcheck">Check now</button><button type="button" class="primary" id="updinstall" hidden>Update</button></span>
         </div>
         <div class="progressbar" id="updbar" hidden><i id="updfill"></i></div>
-        <label class="row"><span><b>Check for updates automatically</b><small>Once a day, Goatr asks GitHub whether a newer version exists. Nothing about you is sent.</small></span>
+        <label class="row"><span><b>Check for updates automatically</b><small>Once a day, Goat asks GitHub whether a newer version exists. Nothing about you is sent.</small></span>
           <input type="checkbox" class="toggle" data-key="updates.auto">
         </label>
         <div class="row" id="uninstallrow" hidden>
-          <span><b>Uninstall Goatr</b><small>Removes Goatr from this computer. You can keep your profile (cookies, bookmarks, settings) for later.</small></span>
+          <span><b>Uninstall Goat</b><small>Removes Goat from this computer. You can keep your profile (cookies, bookmarks, settings) for later.</small></span>
           <button class="danger" id="uninstall">Uninstall…</button>
         </div>
       </div>

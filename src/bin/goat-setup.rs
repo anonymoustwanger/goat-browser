@@ -1,11 +1,11 @@
-//! Goatr's installer, updater and uninstaller (a port of Goat Browser's setup screen).
+//! Goat's installer, updater and uninstaller (a port of Goat Browser's setup screen).
 //!
-//!   GoatrSetup.exe                  install the latest Goatr from GitHub Releases (or update it)
-//!   "Goatr Setup.exe" --uninstall   remove Goatr (Windows "Apps > Uninstall")
+//!   GoatSetup.exe                  install the latest Goat from GitHub Releases (or update it)
+//!   "Goat Setup.exe" --uninstall   remove Goat (Windows "Apps > Uninstall")
 //!   ... --uninstall --silent        remove without asking, keeping your data
 //!
-//! Installs per user (no admin) into %LOCALAPPDATA%\Programs\Goatr, adds Start menu and desktop
-//! shortcuts and registers Goatr as a browser in HKCU. Your data in %APPDATA%\Goatr is only
+//! Installs per user (no admin) into %LOCALAPPDATA%\Programs\Goat, adds Start menu and desktop
+//! shortcuts and registers Goat as a browser in HKCU. Your data in %APPDATA%\Goat is only
 //! deleted if you tick the box while uninstalling.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 #![allow(deprecated)]
@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const APP: &str = "Goatr";
-const EXE: &str = "Goatr.exe";
-const SETUP_EXE: &str = "Goatr Setup.exe";
+const APP: &str = "Goat";
+const EXE: &str = "Goat.exe";
+const SETUP_EXE: &str = "Goat Setup.exe";
 const REPO: &str = "anonymoustwanger/goat-browser";
 const REGKEY: &str = "Goatr";
 const PROGID: &str = "GoatrHTML";
@@ -59,13 +59,13 @@ struct Release {
     exe_url: String,
     exe_size: u64,
     dll_url: Option<String>,
-    /// Install the copy of Goatr built into this installer instead of downloading.
+    /// Install the copy of Goat built into this installer instead of downloading.
     bundled: bool,
 }
 
-/// The Goatr.exe built into this installer (empty in builds without one), so installing works
+/// The Goat.exe built into this installer (empty in builds without one), so installing works
 /// offline; GitHub is only used when it has a newer version.
-const BUNDLED_EXE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/bundle/Goatr.exe"));
+const BUNDLED_EXE: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/bundle/Goat.exe"));
 const BUNDLED_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn bundled_release() -> Option<Release> {
@@ -148,7 +148,7 @@ fn diag_turn_off() -> Result<(), String> {
     Err("Only on Windows.".into())
 }
 
-/// Choices on the Advanced screen, saved into Goatr's settings when installing.
+/// Choices on the Advanced screen, saved into Goat's settings when installing.
 #[derive(Clone)]
 struct Adv {
     dns: String,
@@ -191,7 +191,7 @@ fn data_file() -> PathBuf {
 }
 
 impl Adv {
-    /// Your current settings when Goatr is already set up, else the installer's defaults (no DNS).
+    /// Your current settings when Goat is already set up, else the installer's defaults (no DNS).
     fn load() -> Self {
         let j: serde_json::Value = std::fs::read_to_string(data_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let st = &j["settings"];
@@ -199,7 +199,7 @@ impl Adv {
         Adv { dns: get("dns_provider", "off"), theme: get("theme", "system"), search: get("search_engine", "duckduckgo"), adblock: get("adblock_level", "standard") }
     }
 
-    /// Merge into Goatr's data file, keeping everything else in it.
+    /// Merge into Goat's data file, keeping everything else in it.
     fn save(&self) -> Result<(), String> {
         let path = data_file();
         let mut j: serde_json::Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
@@ -242,7 +242,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
     let viewport = egui::ViewportBuilder::default()
-        .with_title(if mode == Mode::Install { "Goatr setup" } else { "Uninstall Goatr" })
+        .with_title(if mode == Mode::Install { "Goat setup" } else { "Uninstall Goat" })
         .with_inner_size([640.0, 460.0])
         .with_resizable(false)
         .with_maximize_button(false)
@@ -250,7 +250,7 @@ fn main() -> eframe::Result<()> {
         .with_icon(icon());
     let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, centered: true, ..Default::default() };
     eframe::run_native(
-        "Goatr setup",
+        "Goat setup",
         options,
         Box::new(move |cc| {
             fonts(&cc.egui_ctx);
@@ -290,22 +290,24 @@ fn default_dir() -> PathBuf {
     }
     #[cfg(not(windows))]
     {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local").join("share").join("goatr-app")
+        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local").join("share").join("goat-app")
     }
 }
 
 fn data_dir() -> PathBuf {
     #[cfg(windows)]
-    {
-        PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join(APP)
-    }
+    let (base, new, old) = (PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()), APP, "Goatr");
     #[cfg(not(windows))]
-    {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local").join("share").join("goatr")
+    let (base, new, old) = (PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local").join("share"), "goat", "goatr");
+    // Data from when the browser was called Goatr moves to the new name.
+    let (dir, prev) = (base.join(new), base.join(old));
+    if !dir.exists() && prev.is_dir() {
+        let _ = std::fs::rename(&prev, &dir);
     }
+    dir
 }
 
-/// Where Goatr is installed now, and which version.
+/// Where Goat is installed now, and which version.
 fn installed() -> Option<(PathBuf, String)> {
     let mut candidates = vec![];
     #[cfg(windows)]
@@ -335,7 +337,7 @@ fn agent() -> ureq::Agent {
         .timeout_global(Some(Duration::from_secs(900)))
         .max_redirects(10)
         .http_status_as_error(false)
-        .user_agent("Goatr-Setup")
+        .user_agent("Goat-Setup")
         .build()
         .into()
 }
@@ -352,7 +354,7 @@ fn latest_release() -> Result<Release, String> {
         .map_err(|e| format!("Couldn't reach GitHub: {e}"))?;
     match resp.status().as_u16() {
         200 => {}
-        404 => return Err("No Goatr release found on GitHub yet (or the repository is private).".into()),
+        404 => return Err("No Goat release found on GitHub yet (or the repository is private).".into()),
         403 | 429 => return Err("GitHub is limiting requests right now. Try again in a few minutes.".into()),
         s => return Err(format!("GitHub answered {s}.")),
     }
@@ -363,7 +365,7 @@ fn latest_release() -> Result<Release, String> {
     let find = |want: &dyn Fn(&str) -> bool| {
         assets.iter().find(|a| want(&a["name"].as_str().unwrap_or("").to_lowercase())).cloned()
     };
-    let exe = find(&|n| n == "goatr.exe").ok_or("The latest release has no Goatr.exe to download.")?;
+    let exe = find(&|n| n == "goat.exe").ok_or("The latest release has no Goat.exe to download.")?;
     let dll = find(&|n| n == "webview2loader.dll");
     Ok(Release {
         version: if version.is_empty() { "latest".into() } else { version },
@@ -419,7 +421,7 @@ fn download(url: &str, size_hint: u64, mut progress: impl FnMut(f32)) -> Result<
 
 // ---------------------------------------------------------------- install / uninstall
 
-/// Copy of the WebView2 loader Goatr needs, in case a release doesn't include it.
+/// Copy of the WebView2 loader Goat needs, in case a release doesn't include it.
 #[cfg(windows)]
 const WEBVIEW2_LOADER: Option<&[u8]> = Some(include_bytes!("../../assets/WebView2Loader.dll"));
 #[cfg(not(windows))]
@@ -427,32 +429,38 @@ const WEBVIEW2_LOADER: Option<&[u8]> = None;
 
 fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &Adv, step: &dyn Fn(&str, f32)) -> Result<(), String> {
     let exe_bytes = if rel.bundled {
-        step("Unpacking Goatr…", 0.4);
+        step("Unpacking Goat…", 0.4);
         BUNDLED_EXE.to_vec()
     } else {
-        step("Downloading Goatr…", 0.0);
-        download(&rel.exe_url, rel.exe_size, |f| step("Downloading Goatr…", f * 0.8))?
+        step("Downloading Goat…", 0.0);
+        download(&rel.exe_url, rel.exe_size, |f| step("Downloading Goat…", f * 0.8))?
     };
     let dll_bytes = match &rel.dll_url {
         Some(u) => Some(download(u, 0, |_| {})?),
         None => WEBVIEW2_LOADER.map(|b| b.to_vec()),
     };
 
-    step("Checking Goatr isn't running…", 0.82);
+    step("Checking Goat isn't running…", 0.82);
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let exe = dir.join(EXE);
     if exe.exists() {
         // A running .exe can't be replaced: moving it aside tells us whether it's in use.
-        let old = dir.join("Goatr.old.exe");
+        let old = dir.join("Goat.old.exe");
         let _ = std::fs::remove_file(&old);
         if std::fs::rename(&exe, &old).is_err() {
-            return Err("Goatr is open. Close all Goatr windows (including private and Tor windows), then click Try again.".into());
+            return Err("Goat is open. Close all Goat windows (including private and Tor windows), then click Try again.".into());
         }
         let _ = std::fs::remove_file(&old);
     }
+    // The browser used to be called Goatr: its old exe goes too (and must not be running).
+    let legacy = dir.join("Goatr.exe");
+    if legacy.exists() && std::fs::remove_file(&legacy).is_err() {
+        return Err("Goatr is open. Close all its windows, then click Try again.".into());
+    }
+    let _ = std::fs::remove_file(dir.join("Goatr Setup.exe"));
 
     step("Copying files…", 0.86);
-    std::fs::write(&exe, &exe_bytes).map_err(|e| format!("Couldn't write Goatr.exe: {e}"))?;
+    std::fs::write(&exe, &exe_bytes).map_err(|e| format!("Couldn't write Goat.exe: {e}"))?;
     if let Some(b) = dll_bytes {
         let p = dir.join("WebView2Loader.dll");
         if std::fs::write(&p, &b).is_err() && !p.exists() {
@@ -475,6 +483,9 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &A
     #[cfg(windows)]
     {
         step("Adding shortcuts…", 0.92);
+        for l in legacy_links() {
+            let _ = std::fs::remove_file(l);
+        }
         shortcut(&start_menu_link(), dir)?;
         if desktop {
             shortcut(&desktop_link(), dir)?;
@@ -496,12 +507,12 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &A
 }
 
 fn uninstall(dir: &Path, remove_data: bool, step: &dyn Fn(&str, f32)) -> Result<(), String> {
-    step("Checking Goatr isn't running…", 0.1);
+    step("Checking Goat isn't running…", 0.1);
     let exe = dir.join(EXE);
     if exe.exists() {
-        let probe = dir.join("Goatr.closing.exe");
+        let probe = dir.join("Goat.closing.exe");
         if std::fs::rename(&exe, &probe).is_err() {
-            return Err("Goatr is open. Close all Goatr windows, then try again.".into());
+            return Err("Goat is open. Close all Goat windows, then try again.".into());
         }
         let _ = std::fs::rename(&probe, &exe);
     }
@@ -510,6 +521,9 @@ fn uninstall(dir: &Path, remove_data: bool, step: &dyn Fn(&str, f32)) -> Result<
         step("Removing shortcuts…", 0.3);
         let _ = std::fs::remove_file(start_menu_link());
         let _ = std::fs::remove_file(desktop_link());
+        for l in legacy_links() {
+            let _ = std::fs::remove_file(l);
+        }
         step("Removing from Windows…", 0.5);
         unregister();
     }
@@ -584,6 +598,13 @@ fn start_menu_link() -> PathBuf {
         .join(format!("{APP}.lnk"))
 }
 
+/// Shortcuts from when the browser was called Goatr.
+#[cfg(windows)]
+fn legacy_links() -> [PathBuf; 2] {
+    let rename = |p: PathBuf| p.with_file_name("Goatr.lnk");
+    [rename(start_menu_link()), rename(desktop_link())]
+}
+
 #[cfg(windows)]
 fn desktop_link() -> PathBuf {
     let home = PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default());
@@ -596,7 +617,7 @@ fn desktop_link() -> PathBuf {
     desk.join(format!("{APP}.lnk"))
 }
 
-/// A .lnk to Goatr carrying Goatr's taskbar id, so a pinned shortcut and the running window
+/// A .lnk to Goat carrying Goat's taskbar id, so a pinned shortcut and the running window
 /// share one taskbar button.
 #[cfg(windows)]
 fn shortcut(link: &Path, dir: &Path) -> Result<(), String> {
@@ -617,7 +638,7 @@ fn shortcut(link: &Path, dir: &Path) -> Result<(), String> {
             sl.SetPath(&HSTRING::from(exe.as_os_str()))?;
             sl.SetWorkingDirectory(&HSTRING::from(dir.as_os_str()))?;
             sl.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
-            sl.SetDescription(&HSTRING::from("Goatr browser"))?;
+            sl.SetDescription(&HSTRING::from("Goat browser"))?;
             let ps: IPropertyStore = sl.cast()?;
             let v = PROPVARIANT::from(APP);
             ps.SetValue(&PKEY_AppUserModel_ID, &v)?;
@@ -680,7 +701,7 @@ fn register(dir: &Path, version: &str) -> Result<(), String> {
             ("NoRepair", D(1)),
             ("EstimatedSize", D(size_kb)),
         ]),
-        (classes.clone(), vec![("@", S("Goatr HTML Document".into())), ("URL Protocol", S(String::new()))]),
+        (classes.clone(), vec![("@", S("Goat HTML Document".into())), ("URL Protocol", S(String::new()))]),
         (format!(r"{classes}\DefaultIcon"), vec![("@", S(icon.clone()))]),
         (format!(r"{classes}\shell\open\command"), vec![("@", S(format!("\"{exe}\" \"%1\"")))]),
         (format!(r"{classes}\Application"), vec![("ApplicationName", S(APP.into())), ("ApplicationIcon", S(icon.clone()))]),
@@ -705,7 +726,7 @@ fn register(dir: &Path, version: &str) -> Result<(), String> {
     std::fs::write(&file, reg_file(&entries)).map_err(|e| e.to_string())?;
     let ok = std::process::Command::new("reg").arg("import").arg(&file).creation_flags_hidden().status().is_ok_and(|s| s.success());
     let _ = std::fs::remove_file(&file);
-    if ok { Ok(()) } else { Err("Couldn't register Goatr with Windows.".into()) }
+    if ok { Ok(()) } else { Err("Couldn't register Goat with Windows.".into()) }
 }
 
 #[cfg(windows)]
@@ -980,7 +1001,7 @@ impl eframe::App for SetupApp {
         if drag.drag_started() {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
-        let title = if self.mode == Mode::Install { "Goatr setup" } else { "Uninstall Goatr" };
+        let title = if self.mode == Mode::Install { "Goat setup" } else { "Uninstall Goat" };
         ui.painter().text(pos2(bar.left() + 16.0, bar.center().y), Align2::LEFT_CENTER, title, font(12.5), MUTED);
         let busy = self.screen == Screen::Work;
         for (i, kind) in [(0, "close"), (1, "min")] {
@@ -1028,12 +1049,12 @@ impl eframe::App for SetupApp {
                 let (rel, sub, sub_col) = {
                     let s = self.shared.lock().unwrap();
                     match &s.release {
-                        None => (None, "Getting Goatr ready…".to_string(), MUTED),
+                        None => (None, "Getting Goat ready…".to_string(), MUTED),
                         Some(Ok(r)) => {
                             let sub = match &self.existing {
-                                Some((_, v)) if !v.is_empty() && v == &r.version => format!("Goatr {} is installed. Reinstall it to repair.", r.version),
-                                Some((_, v)) if !v.is_empty() => format!("Update from {v} to Goatr {}.", r.version),
-                                _ => format!("Private, fast, and yours. Goatr {}.", r.version),
+                                Some((_, v)) if !v.is_empty() && v == &r.version => format!("Goat {} is installed. Reinstall it to repair.", r.version),
+                                Some((_, v)) if !v.is_empty() => format!("Update from {v} to Goat {}.", r.version),
+                                _ => format!("Private, fast, and yours. Goat {}.", r.version),
                             };
                             (Some(r.clone()), sub, MUTED)
                         }
@@ -1041,7 +1062,7 @@ impl eframe::App for SetupApp {
                     }
                 };
                 let failed = matches!(self.shared.lock().unwrap().release, Some(Err(_)));
-                let title = if self.existing.is_some() { "Update Goatr" } else { "Install Goatr" };
+                let title = if self.existing.is_some() { "Update Goat" } else { "Install Goat" };
                 self.hero(ui, body.min, title, &sub, sub_col);
 
                 let card = Rect::from_min_size(pos2(body.left(), body.top() + 84.0), vec2(body.width(), 3.0 * 58.0 + 12.0));
@@ -1049,10 +1070,10 @@ impl eframe::App for SetupApp {
                 ui.painter().rect_stroke(card, 14, Stroke::new(1.0, LINE), StrokeKind::Inside);
                 let row = |i: f32| Rect::from_min_size(pos2(card.left() + 6.0, card.top() + 6.0 + i * 58.0), vec2(card.width() - 12.0, 58.0));
                 let mut desktop = self.desktop;
-                self.checkbox(ui, row(0.0), &mut desktop, "Desktop shortcut", "Put Goatr on your desktop.");
+                self.checkbox(ui, row(0.0), &mut desktop, "Desktop shortcut", "Put Goat on your desktop.");
                 self.desktop = desktop;
                 let mut def = self.make_default;
-                self.checkbox(ui, row(1.0), &mut def, "Make Goatr my default browser", "Opens Windows settings after installing, so links open in Goatr.");
+                self.checkbox(ui, row(1.0), &mut def, "Make Goat my default browser", "Opens Windows settings after installing, so links open in Goat.");
                 self.make_default = def;
                 // Install location.
                 let loc = row(2.0);
@@ -1069,7 +1090,7 @@ impl eframe::App for SetupApp {
                 ui.painter().text(
                     pos2(body.left(), card.bottom() + 16.0),
                     Align2::LEFT_TOP,
-                    "Installs just for you, no admin needed. Your data in %APPDATA%\\Goatr is kept.",
+                    "Installs just for you, no admin needed. Your data in %APPDATA%\\Goat is kept.",
                     font(12.0),
                     MUTED,
                 );
@@ -1096,14 +1117,14 @@ impl eframe::App for SetupApp {
                 }
             }
             Screen::Advanced => {
-                self.hero(ui, body.min, "Advanced options", "Pick how Goatr starts out. You can change all of this later in Settings.", MUTED);
+                self.hero(ui, body.min, "Advanced options", "Pick how Goat starts out. You can change all of this later in Settings.", MUTED);
                 let card = Rect::from_min_size(pos2(body.left(), body.top() + 84.0), vec2(body.width(), 4.0 * 58.0 + 12.0));
                 ui.painter().rect_filled(card, 14, BG2);
                 ui.painter().rect_stroke(card, 14, Stroke::new(1.0, LINE), StrokeKind::Inside);
                 let row = |i: f32| Rect::from_min_size(pos2(card.left() + 6.0, card.top() + 6.0 + i * 58.0), vec2(card.width() - 12.0, 58.0));
                 let mut adv = self.adv.clone();
                 self.select(ui, row(0.0), "Encrypted DNS", "Off uses your OS DNS.", DNS_CHOICES, &mut adv.dns);
-                self.select(ui, row(1.0), "Theme", "Colours for Goatr and its pages.", THEME_CHOICES, &mut adv.theme);
+                self.select(ui, row(1.0), "Theme", "Colours for Goat and its pages.", THEME_CHOICES, &mut adv.theme);
                 self.select(ui, row(2.0), "Search engine", "Used when you type in the address bar.", SEARCH_CHOICES, &mut adv.search);
                 self.select(ui, row(3.0), "Ad blocker", "Strict can break a few sites.", ADBLOCK_CHOICES, &mut adv.adblock);
                 self.adv = adv;
@@ -1118,7 +1139,7 @@ impl eframe::App for SetupApp {
                 ui.painter().line_segment([c + vec2(0.0, -12.0), c + vec2(0.0, 4.0)], Stroke::new(3.2, amber));
                 ui.painter().circle_filled(c + vec2(0.0, 12.0), 2.0, amber);
                 ui.painter().text(pos2(c.x, c.y + 50.0), Align2::CENTER_TOP, "Heads up about Microsoft", bold(22.0), TEXT);
-                let msg = "Goatr runs on Microsoft's WebView2 engine. Goatr itself sends no analytics, but WebView2 sends diagnostic data to Microsoft unless you turn it off in Windows settings.\n\nGoatr can switch off \"Send optional diagnostic data\" for you. Windows will ask for admin permission once.";
+                let msg = "Goat runs on Microsoft's WebView2 engine. Goat itself sends no analytics, but WebView2 sends diagnostic data to Microsoft unless you turn it off in Windows settings.\n\nGoat can switch off \"Send optional diagnostic data\" for you. Windows will ask for admin permission once.";
                 let galley = ui.painter().layout(msg.to_string(), font(13.0), MUTED, body.width() - 60.0);
                 let gpos = pos2(c.x - galley.size().x / 2.0, c.y + 86.0);
                 let below = gpos.y + galley.size().y + 14.0;
@@ -1157,7 +1178,7 @@ impl eframe::App for SetupApp {
                 }
             }
             Screen::Confirm => {
-                self.hero(ui, body.min, "Uninstall Goatr", "Goatr will be removed from this computer.", MUTED);
+                self.hero(ui, body.min, "Uninstall Goat", "Goat will be removed from this computer.", MUTED);
                 let card = Rect::from_min_size(pos2(body.left(), body.top() + 84.0), vec2(body.width(), 96.0));
                 ui.painter().rect_filled(card, 14, BG2);
                 ui.painter().rect_stroke(card, 14, Stroke::new(1.0, LINE), StrokeKind::Inside);
@@ -1166,7 +1187,7 @@ impl eframe::App for SetupApp {
                 self.checkbox(ui, r, &mut rm, "Also delete my data", "History, bookmarks, settings, passwords saved in sites and extensions.");
                 self.remove_data = rm;
                 ui.painter().text(pos2(r.left() + 44.0, r.top() + 54.0), Align2::LEFT_TOP, data_dir().display().to_string(), font(11.5), MUTED.gamma_multiply(0.8));
-                if self.button(ui, ghost_r, "Keep Goatr", 0, true) {
+                if self.button(ui, ghost_r, "Keep Goat", 0, true) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 if self.button(ui, primary_r, "Uninstall", 2, true) {
@@ -1206,9 +1227,9 @@ impl eframe::App for SetupApp {
                     Stroke::new(3.2, ACCENT),
                 ));
                 let (h, sub) = if self.mode == Mode::Install {
-                    ("Goatr is ready", "Find it in the Start menu any time.")
+                    ("Goat is ready", "Find it in the Start menu any time.")
                 } else {
-                    ("Goatr was removed", "Thanks for using Goatr.")
+                    ("Goat was removed", "Thanks for using Goat.")
                 };
                 ui.painter().text(pos2(c.x, c.y + 54.0), Align2::CENTER_TOP, h, bold(22.0), TEXT);
                 ui.painter().text(pos2(c.x, c.y + 88.0), Align2::CENTER_TOP, sub, font(13.0), MUTED);
@@ -1216,7 +1237,7 @@ impl eframe::App for SetupApp {
                     if self.button(ui, ghost_r, "Close", 0, true) {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-                    if self.button(ui, primary_r, "Open Goatr", 1, true) {
+                    if self.button(ui, primary_r, "Open Goat", 1, true) {
                         let dir = PathBuf::from(self.dir.trim());
                         let _ = std::process::Command::new(dir.join(EXE)).current_dir(&dir).spawn();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);

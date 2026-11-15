@@ -1,7 +1,7 @@
 #!/bin/sh
-# Goatr AppImage launcher.
+# Goat AppImage launcher.
 HERE="$(dirname "$(readlink -f "$0")")"
-APP="$HERE/usr/lib/goatr"
+APP="$HERE/usr/lib/goat"
 EXTRA=""
 # Chromium's sandbox needs unprivileged user namespaces (an AppImage can't ship the
 # setuid helper). If the system blocks them (e.g. Ubuntu 24.04+ AppArmor), fall back
@@ -13,7 +13,7 @@ elif command -v unshare >/dev/null 2>&1 && ! unshare -Ur true >/dev/null 2>&1; t
   EXTRA="--no-sandbox"
 fi
 if [ -n "$EXTRA" ]; then
-  echo "Goatr: this system blocks unprivileged user namespaces, so Chromium's sandbox is off." >&2
-  echo "Goatr: to turn it on, see https://github.com/anonymoustwanger/goatr#linux" >&2
+  echo "Goat: this system blocks unprivileged user namespaces, so Chromium's sandbox is off." >&2
+  echo "Goat: to turn it on, see https://github.com/anonymoustwanger/goat-browser/tree/main/linux#sandbox" >&2
 fi
-exec "$APP/goatr" $EXTRA "$@"
+exec "$APP/goat" $EXTRA "$@"

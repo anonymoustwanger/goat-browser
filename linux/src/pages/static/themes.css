@@ -1,4 +1,4 @@
-/* Goatr themes + motion tokens. Shared by the toolbar and internal pages. */
+/* Goat themes + motion tokens. Shared by the toolbar and internal pages. */
 :root, [data-theme="midnight"] {
   --accent-2: #6ea8ff;
   --bg: #101214; --bg-2: #181b1f; --bg-3: #22262b; --line: #2b3036;
