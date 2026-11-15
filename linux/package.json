@@ -10,7 +10,7 @@
     "appimage": "npm run package:linux && sh installer/linux/build-appimage.sh",
     "tar": "npm run package:linux && sh installer/linux/build-tar.sh"
   },
-  "license": "MIT",
+  "license": "UNLICENSED",
   "devDependencies": {
     "@electron/packager": "^20.3.0",
     "electron": "^45.2.3",

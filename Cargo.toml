@@ -3,6 +3,8 @@ name = "goat"
 version = "1.0.0"
 edition = "2021"
 description = "A Rust web browser built on WebView2"
+license-file = "LICENSE"
+publish = false
 
 [dependencies]
 wry = { version = "0.57", features = ["devtools"] }
