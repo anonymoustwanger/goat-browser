@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' goat://static; style-src goat://static; img-src data:">
   <title>Settings</title>
   <script src="goat://static/theme.js"></script>
+  <script src="goat://static/dialog.js" defer></script>
   <link rel="stylesheet" href="goat://static/themes.css">
   <link rel="stylesheet" href="goat://static/shared.css">
   <link rel="stylesheet" href="goat://static/settings.css">
@@ -158,6 +159,9 @@
         </div>
         <label class="row"><span><b>Gradients</b><small>Soft color gradients on the toolbar, pages and buttons.</small></span>
           <input type="checkbox" class="toggle" data-key="appearance.gradients">
+        </label>
+        <label class="row"><span><b>Site icons</b><small>Show each site's icon on tabs and bookmarks. Off shows the first letter instead.</small></span>
+          <input type="checkbox" class="toggle" data-key="appearance.siteIcons">
         </label>
         <div class="row col">
           <span><b>Animations</b><small>Tab, folder and page motion.</small></span>

@@ -28,7 +28,7 @@ pub static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::Atomic
 
 /// Ask Windows 11 for rounded corners on a pop-up window (found by its unique title).
 #[cfg(windows)]
-fn round_corners(title: &str) {
+pub fn round_corners(title: &str) {
     use windows::core::HSTRING;
     use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND};
     use windows::Win32::UI::WindowsAndMessaging::FindWindowW;

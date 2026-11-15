@@ -1,6 +1,6 @@
 {
   "name": "goat",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Goat: private, fast browser (Linux edition, built on Electron)",
   "main": "src/main.js",
   "scripts": {

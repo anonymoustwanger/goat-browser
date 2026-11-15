@@ -54,6 +54,10 @@ const INJECT_JS: &str = include_str!("inject.js");
 const VOLUME_JS: &str = include_str!("volume.js");
 const PASTE_JS: &str = include_str!("paste.js");
 
+/// Title of the floating preview of a tab being dragged out (so it's skipped when looking for
+/// the window under the mouse).
+pub const DRAG_PREVIEW_TITLE: &str = "Goat tab drag";
+
 /// Where the built-in goatr:// pages live inside the webview.
 #[cfg(windows)]
 pub const INTERNAL_BASE: &str = "http://goatr.localhost";
@@ -373,6 +377,9 @@ pub struct App {
     pub tab_rects: std::collections::HashMap<u32, Rect>,
     /// The tab being dragged: (id, where in the tab it was grabbed, has it moved).
     pub tab_drag: Option<(u32, f32, bool)>,
+    /// The floating preview of a tab pulled out of the strip: (title, icon, appeared at,
+    /// dropped at).
+    pub tear_preview: Option<(String, Option<egui::TextureId>, f64, Option<f64>)>,
     /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
     pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
@@ -505,9 +512,13 @@ fn main() -> eframe::Result<()> {
         // The GPU surface format is picked from this window, and pop-ups need one with
         // transparency to be see-through. Goat paints its own background, so this looks the same.
         .with_transparent(true)
-        .with_inner_size([1300.0, 860.0])
+        .with_inner_size(launch_size().unwrap_or([1300.0, 860.0]))
         .with_min_inner_size([520.0, 320.0])
         .with_icon(app_icon());
+    let viewport = match launch_pos() {
+        Some(p) => viewport.with_position(p),
+        None => viewport,
+    };
     // Windows: no per-window vsync. With it, every open pop-up window waited for its own screen
     // refresh, halving the frame rate while a menu animated. Frames are paced once instead, by
     // DwmFlush at the start of each frame (Windows composes windows, so there's no tearing).
@@ -615,6 +626,7 @@ fn main() -> eframe::Result<()> {
                 ghosts: Vec::new(),
                 tab_rects: Default::default(),
                 tab_drag: None,
+                tear_preview: None,
                 site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
@@ -1221,6 +1233,89 @@ impl App {
         }
     }
 
+    /// The window-shaped preview that follows a tab pulled out of the strip, and settles where
+    /// the new window opens when you let go.
+    fn draw_tear_preview(&mut self, ctx: &egui::Context) {
+        let Some((title, icon, born, dropped)) = self.tear_preview.clone() else { return };
+        let t = now(ctx);
+        if dropped.is_some_and(|d| t - d > 0.45) {
+            self.tear_preview = None;
+            return;
+        }
+        let ppp = ctx.pixels_per_point();
+        #[cfg(windows)]
+        let cur = winhooks::cursor_pos().map(|(x, y)| egui::pos2(x / ppp, y / ppp));
+        #[cfg(not(windows))]
+        let cur = ctx.input(|i| i.pointer.latest_pos());
+        let Some(cur) = cur else { return };
+        let (w, h) = (300.0, 200.0);
+        // The window is see-through around the card (shadow room).
+        let pad = 18.0;
+        let pos = egui::pos2(cur.x - 40.0 - pad, cur.y - 14.0 - pad);
+        let pal = self.palette();
+        let builder = egui::ViewportBuilder::default()
+            .with_title(DRAG_PREVIEW_TITLE)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_taskbar(false)
+            .with_active(false)
+            .with_always_on_top()
+            .with_mouse_passthrough(true)
+            .with_position(pos)
+            .with_inner_size([w + pad * 2.0, h + pad * 2.0]);
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("goat-tear-preview"), builder, |ui, _| {
+            let c = ui.ctx().clone();
+            // First frame: no Windows border or rounded frame around the see-through window.
+            #[cfg(windows)]
+            if dropped.is_none() && t - born < 0.05 {
+                panels::round_corners(DRAG_PREVIEW_TITLE);
+            }
+            let full = ui.max_rect();
+            let card = Rect::from_min_size(full.min + egui::vec2(pad, pad), egui::vec2(w, h));
+            // Pops in like Goat's menus; on drop, swells a touch and fades as the window opens.
+            let (scale, op) = match dropped {
+                None => (anim::pop(((t - born) as f32).min(1.0), 0.8), ((t - born) as f32 / 0.08).clamp(0.0, 1.0)),
+                Some(d) => {
+                    let k = ((t - d) as f32 / 0.45).clamp(0.0, 1.0);
+                    (1.0 + 0.06 * anim::out_cubic(k), 1.0 - anim::in_cubic(k))
+                }
+            };
+            let center = card.center();
+            let card = Rect::from_center_size(center, card.size() * scale);
+            let mut p = ui.painter().clone();
+            p.set_opacity(op * 0.96);
+            paint::shadow(&p, card, 14.0, pal.dark);
+            p.rect_filled(card, 12, pal.bg);
+            // Mini tab strip with the tab, then a page.
+            let strip = Rect::from_min_size(card.min, egui::vec2(card.width(), 34.0));
+            p.rect_filled(strip, egui::CornerRadius { nw: 12, ne: 12, sw: 0, se: 0 }, pal.bg2);
+            let tab = Rect::from_min_size(strip.min + egui::vec2(8.0, 6.0), egui::vec2((card.width() * 0.62).min(200.0), 28.0));
+            p.rect_filled(tab, egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 }, pal.bg3);
+            let dot = Rect::from_min_size(egui::pos2(tab.left() + 9.0, tab.center().y - 7.0), egui::Vec2::splat(14.0));
+            match icon {
+                Some(tex) => {
+                    p.image(tex, dot, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
+                None => {
+                    p.rect_filled(dot, 4, pal.line);
+                }
+            }
+            let galley = p.layout_no_wrap(title.clone(), egui::FontId::proportional(12.0), pal.text);
+            let clip = Rect::from_min_max(egui::pos2(dot.right() + 7.0, tab.top()), egui::pos2(tab.right() - 8.0, tab.bottom()));
+            p.with_clip_rect(clip).galley(egui::pos2(clip.left(), tab.center().y - galley.size().y / 2.0), galley, pal.text);
+            let page = Rect::from_min_max(egui::pos2(card.left() + 8.0, strip.bottom() + 8.0), card.max - egui::vec2(8.0, 8.0));
+            p.rect_filled(page, 8, pal.bg2);
+            for k in 0..4 {
+                let y = page.top() + 16.0 + k as f32 * 18.0;
+                let wl = page.width() * [0.7, 0.9, 0.55, 0.8][k];
+                p.rect_filled(Rect::from_min_size(egui::pos2(page.left() + 14.0, y), egui::vec2(wl - 28.0, 8.0)), 4, pal.bg3);
+            }
+            c.request_repaint();
+        });
+        ctx.request_repaint();
+    }
+
     /// A tab dragged out of the strip and let go: into the Goat window under the mouse (same
     /// profile and kind), or, over anything else, a window of its own.
     fn tear_off(&mut self, id: u32) {
@@ -1265,6 +1360,14 @@ impl App {
                 if !prof.is_empty() {
                     cmd.args(["--profile", &prof]);
                 }
+                // Open where you let go, the size of this window, under the settling preview.
+                let ppp = self.ctx.pixels_per_point();
+                let size = self.ctx.input(|i| i.viewport().inner_rect).map(|r| r.size()).unwrap_or(egui::vec2(1300.0, 860.0));
+                #[cfg(windows)]
+                if let Some((x, y)) = winhooks::cursor_pos() {
+                    cmd.arg(format!("--pos={},{}", (x / ppp - 60.0).round(), (y / ppp - 16.0).round()));
+                }
+                cmd.arg(format!("--size={},{}", size.x.round(), size.y.round()));
                 cmd.arg(&url);
                 if cmd.spawn().is_ok() {
                     self.close(id);
@@ -2805,6 +2908,7 @@ impl eframe::App for App {
         self.draw_chrome(ui, &mut cmds);
         crashlog::phase("frame: pop-up windows");
         self.draw_popups(ui.ctx(), &mut cmds);
+        self.draw_tear_preview(ui.ctx());
 
         crashlog::phase("frame: commands");
         for c in cmds {
@@ -2927,4 +3031,18 @@ fn decode_icon(ctx: &egui::Context, host: &str, png: &[u8]) -> Option<egui::Text
     }
     let ci = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], img.as_raw());
     Some(ctx.load_texture(format!("fav-{host}"), ci, egui::TextureOptions::LINEAR))
+}
+
+/// `--size=W,H` (a window torn off from another one opens at its size).
+fn launch_size() -> Option<[f32; 2]> {
+    let a = std::env::args().find_map(|a| a.strip_prefix("--size=").map(String::from))?;
+    let (w, h) = a.split_once(',')?;
+    Some([w.trim().parse::<f32>().ok()?.max(520.0), h.trim().parse::<f32>().ok()?.max(320.0)])
+}
+
+/// `--pos=X,Y`: where a torn-off window opens (screen points).
+fn launch_pos() -> Option<[f32; 2]> {
+    let a = std::env::args().find_map(|a| a.strip_prefix("--pos=").map(String::from))?;
+    let (x, y) = a.split_once(',')?;
+    Some([x.trim().parse().ok()?, y.trim().parse().ok()?])
 }

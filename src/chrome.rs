@@ -505,6 +505,16 @@ impl App {
                         }
                         // Pulled down out of the strip: about to become its own window.
                         lift = (p.y - strip.bottom()).max(0.0).min(24.0);
+                        let screen = ctx.input(|i| i.viewport_rect());
+                        let outside = p.y > strip.bottom() + 40.0 || p.y < strip.top() - 10.0 || !screen.contains(p);
+                        if outside && self.tabs.len() > 1 {
+                            if self.tear_preview.as_ref().is_none_or(|t| t.3.is_some()) {
+                                let icon = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.favicon.as_ref()).filter(|_| self.settings().site_icons).map(|f| f.1.id());
+                                self.tear_preview = Some((title.clone(), icon, t_now, None));
+                            }
+                        } else if self.tear_preview.as_ref().is_some_and(|t| t.3.is_none()) {
+                            self.tear_preview = None;
+                        }
                         if let Some(d) = self.tab_drag.as_mut() {
                             d.2 = true;
                         }
@@ -560,6 +570,12 @@ impl App {
                 };
                 if moved && out {
                     cmds.push(Cmd::TearOff(did));
+                    // The preview settles and fades where the new window opens.
+                    if let Some(tp) = self.tear_preview.as_mut() {
+                        tp.3 = Some(t_now);
+                    }
+                } else {
+                    self.tear_preview = None;
                 }
             }
         }

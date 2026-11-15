@@ -214,19 +214,37 @@ pub fn listen_window(accept: impl Fn(String, String, String) -> bool + Send + 's
         .ok();
 }
 
-/// The Goat window process under a screen point, if it's another Goat window.
+/// The process of the top window under a screen point (Goat's drag preview doesn't count).
 #[cfg(windows)]
 pub fn window_pid_at(x: f32, y: f32) -> Option<u32> {
-    use windows::Win32::Foundation::POINT;
-    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
-    unsafe {
-        let h = WindowFromPoint(POINT { x: x as i32, y: y as i32 });
-        if h.is_invalid() {
-            return None;
-        }
-        let root = GetAncestor(h, GA_ROOT);
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(if root.is_invalid() { h } else { root }, Some(&mut pid));
-        (pid != 0).then_some(pid)
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible};
+    struct Find {
+        x: i32,
+        y: i32,
+        pid: u32,
     }
+    unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
+        let f = &mut *(lp.0 as *mut Find);
+        if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
+            return true.into();
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(h, &mut r).is_err() || f.x < r.left || f.x >= r.right || f.y < r.top || f.y >= r.bottom {
+            return true.into();
+        }
+        let mut buf = [0u16; 64];
+        let n = GetWindowTextW(h, &mut buf) as usize;
+        if String::from_utf16_lossy(&buf[..n]) == crate::DRAG_PREVIEW_TITLE {
+            return true.into();
+        }
+        GetWindowThreadProcessId(h, Some(&mut f.pid));
+        false.into() // topmost hit: stop
+    }
+    let mut f = Find { x: x as i32, y: y as i32, pid: 0 };
+    unsafe {
+        let _ = EnumWindows(Some(each), LPARAM(&mut f as *mut Find as isize));
+    }
+    (f.pid != 0).then_some(f.pid)
 }

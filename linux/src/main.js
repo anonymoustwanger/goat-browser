@@ -202,7 +202,7 @@ const DEFAULT_SETTINGS = {
   languages: { sites: 'en', translateTo: 'en', offer: true, auto: false, engine: 'libre', libreUrl: 'https://libretranslate.com', libreKey: '' },
   performance: { sleepAfterMin: 30 },
   showBookmarksBar: true,
-  appearance: { theme: 'system', motion: 'system', gradients: true, customThemes: [] },
+  appearance: { theme: 'system', motion: 'system', gradients: true, customThemes: [], siteIcons: true }, // siteIcons: off shows first letters
   stats: { blocked: 0 },
   httpsOnly: true,
   secureDns: true,
@@ -1102,6 +1102,47 @@ function configureSession(s) {
   });
 }
 
+// ------------------------------------------------------------ site icons
+// Each site's icon, saved (as a small PNG) when a normal tab shows it, for tabs and bookmarks.
+const iconCache = new Map(); // host -> data: URL, or null when there's none
+const iconsDir = () => path.join(userDir(), 'favicons');
+const iconFile = (host) => path.join(iconsDir(), host.replace(/[^a-z0-9.-]/gi, '') + '.png');
+function hostIcon(url) {
+  if (settings.appearance.siteIcons === false || !/^https?:/i.test(url || '')) return null;
+  let host;
+  try { host = new URL(url).hostname; } catch { return null; }
+  if (!iconCache.has(host)) {
+    let v = null;
+    try { v = 'data:image/png;base64,' + fs.readFileSync(iconFile(host)).toString('base64'); } catch { /* none yet */ }
+    iconCache.set(host, v);
+  }
+  return iconCache.get(host);
+}
+// Bookmarks (and folders) with their site icons, for the bookmarks bar and the new tab page.
+function withIcons(items) {
+  return items.map((b) => (b.type === 'folder' ? { ...b, children: withIcons(b.children || []) } : { ...b, icon: hostIcon(b.url) }));
+}
+async function loadTabIcon(tab, wc, iconUrl) {
+  try {
+    const r = await wc.session.fetch(iconUrl);
+    if (!r.ok) return;
+    const { nativeImage } = require('electron');
+    let img = nativeImage.createFromBuffer(Buffer.from(await r.arrayBuffer()));
+    if (img.isEmpty()) return;
+    img = img.resize({ width: 32, height: 32, quality: 'best' });
+    const png = img.toPNG();
+    const host = new URL(displayUrl(wc)).hostname;
+    tab.icon = 'data:image/png;base64,' + png.toString('base64');
+    tab.iconHost = host;
+    iconCache.set(host, tab.icon);
+    if (!tab.private && !EPHEMERAL) {
+      fs.mkdirSync(iconsDir(), { recursive: true });
+      fs.writeFileSync(iconFile(host), png);
+    }
+    scheduleState();
+  } catch { /* no icon */ }
+}
+
 function serveInternal(req) {
   const u = new URL(req.url);
   const rel = path.normalize(path.join(u.hostname, decodeURIComponent(u.pathname)));
@@ -1241,6 +1282,7 @@ function wireTab(tab) {
   wc.on('did-start-navigation', (d) => {
     if (d.isMainFrame && !d.isSameDocument) { tab.blocked = 0; scheduleState(); }
   });
+  wc.on('page-favicon-updated', (_e, list) => { if (list && list[0]) loadTabIcon(tab, wc, list[0]); });
 
   wc.on('will-navigate', (e) => {
     const target = e.url;
@@ -1730,7 +1772,7 @@ function pushState() {
     updateReady: update.state === 'available' && settings.updates.skip !== update.version,
     bookmarksBar: !!settings.showBookmarksBar,
     pinnedExtensions: settings.extensions.pinned || [],
-    bookmarks: bookmarks.items,
+    bookmarks: withIcons(bookmarks.items),
     bookmarked: !!(activeWc() && findBookmarkByUrl(displayUrl(activeWc()))),
     groups: [...groups.values()],
     tabs: order.map((id) => {
@@ -1742,6 +1784,7 @@ function pushState() {
         groupId: t.groupId,
         title: t.title || url || 'New tab',
         url,
+        icon: settings.appearance.siteIcons !== false && t.icon && (() => { try { return new URL(url).hostname === t.iconHost; } catch { return false; } })() ? t.icon : null,
         loading: wc.isLoading(),
         canBack: wc.navigationHistory.canGoBack(),
         canForward: wc.navigationHistory.canGoForward(),
@@ -2218,7 +2261,7 @@ function saveBookmarks() {
   // Refresh the bookmarks on any open new-tab pages.
   for (const t of tabs.values()) {
     const wc = t.view.webContents;
-    if (!wc.isDestroyed() && wc.getURL().startsWith(NEWTAB_URL)) wc.send('goat:bookmarks', bookmarks.items);
+    if (!wc.isDestroyed() && wc.getURL().startsWith(NEWTAB_URL)) wc.send('goat:bookmarks', withIcons(bookmarks.items));
   }
 }
 const newBmId = () => 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -2937,7 +2980,7 @@ function wirePagesIpc() {
     else activeWc()?.loadURL(String(url));
   }));
   ipcMain.handle('goat:history-settings', fromPage('history', () => { openInternal(SETTINGS_URL + '#privacy'); }));
-  ipcMain.handle('goat:newtab-bookmarks', fromPage('newtab', () => bookmarks.items));
+  ipcMain.handle('goat:newtab-bookmarks', fromPage('newtab', () => withIcons(bookmarks.items)));
   ipcMain.handle('goat:newtab-add', fromPage('newtab', (rawUrl, rawTitle) => {
     const text = String(rawUrl || '').trim();
     const url = toUrl(text);

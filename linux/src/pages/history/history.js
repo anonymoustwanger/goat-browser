@@ -90,7 +90,7 @@ $('range').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!v) return;
   const label = e.target.querySelector(`option[value="${v}"]`).textContent.toLowerCase();
-  if (!confirm(`Delete history from ${label}?`)) return;
+  if (!await goatAsk(`Delete history from ${label}?`, 'Delete', true)) return;
   await api.clear(v);
   selected.clear();
   load(true);

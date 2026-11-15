@@ -70,7 +70,7 @@ function renderProfileList() {
     else btns.append(el('button', { type: 'button', onclick: () => { api.profiles.open(p.id); flash($('profilemsg'), `Opening ${p.name}…`); } }, 'Open'));
     if (PINFO.canShortcut) btns.append(el('button', { type: 'button', title: 'Put a shortcut that opens this profile on your desktop', onclick: async () => { flash($('profilemsg'), (await api.profiles.shortcut(p.id)) ? 'Desktop shortcut added' : "Couldn't add shortcut"); } }, 'Shortcut'));
     if (p.id !== 'default' && !isCur) btns.append(el('button', { type: 'button', class: 'danger', onclick: async () => {
-      if (!confirmDelete(p)) return;
+      if (!await goatDialog({ title: `Delete the profile “${p.name}”?`, text: 'Its cookies, logins, history, bookmarks and settings are deleted. This can\'t be undone.', ok: 'Delete profile', danger: true })) return;
       const r = await api.profiles.remove(p.id);
       PINFO = r.info; renderProfileList();
       flash($('profilemsg'), r.ok ? `${p.name} deleted` : r.error);
@@ -414,7 +414,7 @@ $('cookieform').addEventListener('submit', async (e) => {
 $('cookiesearch').addEventListener('input', renderCookies);
 $('cookiereload').addEventListener('click', loadCookies);
 $('cookieclear').addEventListener('click', async () => {
-  if (!confirm('Delete all cookies? You will be signed out of every site.')) return;
+  if (!await goatAsk('Delete all cookies? You will be signed out of every site.', 'Delete all', true)) return;
   await api.cookies.clear();
   loadCookies();
 });
@@ -466,7 +466,7 @@ document.addEventListener('visibilitychange', renderTasks);
 
 // --------------------------------------------------------------- clear data
 $('cleardata').addEventListener('click', async () => {
-  if (!confirm('Clear all cookies, cache and site data, and close all tabs?')) return;
+  if (!await goatAsk('Clear all cookies, cache and site data, and close all tabs?', 'Clear everything', true)) return;
   await api.clearBrowsingData();
 });
 
@@ -640,7 +640,7 @@ $('ed-save').addEventListener('click', async () => {
 });
 $('ed-delete').addEventListener('click', async () => {
   const t = S.appearance.customThemes.find((x) => x.id === editing);
-  if (!t || !confirm(`Delete the theme “${t.name}”?`)) return;
+  if (!t || !await goatAsk(`Delete the theme “${t.name}”?`, 'Delete theme', true)) return;
   const list = S.appearance.customThemes.filter((x) => x.id !== editing);
   const patch = { appearance: { customThemes: list } };
   if (S.appearance.theme === editing) patch.appearance.theme = 'system';

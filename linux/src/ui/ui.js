@@ -180,7 +180,10 @@ function updateTabEl(el, t) {
   el.title = t.title + (t.url ? '\n' + t.url : '');
   const dot = el.querySelector('.dot');
   if (t.private) { if (!dot.querySelector('svg')) dot.innerHTML = MASK; }
-  else { if (dot.querySelector('svg')) dot.textContent = ''; dot.textContent = t.url ? hostLetter(t) : 'g'; }
+  else if (t.icon) {
+    if (dot._icon !== t.icon) { dot.textContent = ''; const im = document.createElement('img'); im.src = t.icon; im.alt = ''; dot.append(im); dot._icon = t.icon; }
+    dot.classList.add('hasimg');
+  } else { dot._icon = null; dot.classList.remove('hasimg'); if (dot.querySelector('svg,img')) dot.textContent = ''; dot.textContent = t.url ? hostLetter(t) : 'g'; }
   el.querySelector('.title').textContent = t.title;
   const audio = el.querySelector('.audio');
   audio.hidden = !(t.audible || t.muted);
@@ -523,7 +526,9 @@ function bmEl(b, list) {
   el.draggable = bmRenaming !== b.id;
   const ic = document.createElement('span');
   ic.className = 'ic';
-  if (b.type === 'folder') ic.innerHTML = FOLDER_ICON; else ic.textContent = bmLetter(b.url, b.title);
+  if (b.type === 'folder') ic.innerHTML = FOLDER_ICON;
+  else if (b.icon) { const im = document.createElement('img'); im.src = b.icon; im.alt = ''; ic.append(im); ic.classList.add('hasimg'); }
+  else ic.textContent = bmLetter(b.url, b.title);
   el.append(ic);
   if (bmRenaming === b.id) {
     const input = document.createElement('input');

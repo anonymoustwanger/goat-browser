@@ -357,3 +357,7 @@ browser-action-list::part(badge) { font-size: 9px; border-radius: 4px; padding: 
 #settings { position: relative; }
 #settings.has-update::after { content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 0 2px var(--nav-bg, var(--bg)); }
+
+/* site icons on tabs and the bookmarks bar */
+.dot.hasimg, .bm .ic.hasimg { background: none !important; }
+.dot img, .bm .ic img { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; display: block; }

@@ -27,8 +27,15 @@ function tile(b, small) {
     icon.innerHTML = FOLDER_SVG;
   } else {
     const h = host(b.url);
-    const m = /[\p{L}\p{N}]/u.exec(b.title || '');
-    icon.textContent = (m ? m[0] : (h[0] || '•')).toUpperCase();
+    if (b.icon) {
+      const im = document.createElement('img');
+      im.src = b.icon; im.alt = '';
+      icon.append(im);
+      icon.classList.add('hasimg');
+    } else {
+      const m = /[\p{L}\p{N}]/u.exec(b.title || '');
+      icon.textContent = (m ? m[0] : (h[0] || '•')).toUpperCase();
+    }
     icon.style.setProperty('--h', String(hue(h)));
   }
   const label = document.createElement('span');

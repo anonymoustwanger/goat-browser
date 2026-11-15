@@ -118,3 +118,7 @@ body.private .facts { display: none; }
   transition: background-color .12s ease, transform .25s cubic-bezier(.34, 1.56, .64, 1); }
 .tmenu button:hover, .tmenu button:focus-visible { background: var(--bg-3, var(--hover, rgba(127,127,127,.15))); transform: scale(1.03); outline: none; }
 .tmenu button.danger { color: var(--danger, #d33); }
+
+/* site icons on new-tab bookmarks */
+.ticon.hasimg { background: var(--bg-2) !important; box-shadow: none !important; border: 1px solid var(--line); }
+.ticon.hasimg img { width: 26px; height: 26px; border-radius: 6px; object-fit: contain; }
