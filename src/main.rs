@@ -133,6 +133,8 @@ pub enum Cmd {
     NewTorCircuit,
     /// Install the downloaded update now (Goat closes and reopens).
     InstallUpdate,
+    /// Look for a new version now.
+    CheckUpdate,
     /// Set the active tab's volume (1.0 = 100%).
     SetVolume(f32),
     /// Right-click menu: run the engine's own command (copy, paste, save image…).
@@ -1749,6 +1751,11 @@ impl App {
                     self.popup_had_focus = false;
                     self.popup_born = now(&self.ctx);
                 }
+            }
+            Cmd::CheckUpdate => {
+                self.popup = None;
+                self.toast("Checking for updates…");
+                self.check_update(true);
             }
             Cmd::InstallUpdate => {
                 if let Some(u) = self.update.clone() {

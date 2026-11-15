@@ -846,7 +846,12 @@ impl App {
             Row::Sep,
             Row::Item(item(icons::USER, "Profiles", "", Cmd::OpenPage("settings#profiles"))),
             Row::Item(item(icons::COG, "Settings", "Ctrl+,", Cmd::OpenPage("settings"))),
-            Row::Item(item(icons::INFO, &format!("About Goat   v{}", env!("CARGO_PKG_VERSION")), "", Cmd::OpenPage("settings"))),
+            Row::Item(match (&self.update, &self.update_manual) {
+                (Some(u), _) => item(icons::DOWNLOAD, &format!("Update to Goat {}", u.version), "", Cmd::InstallUpdate),
+                (_, Some(v)) => item(icons::DOWNLOAD, &format!("Download Goat {v}"), "", Cmd::InstallUpdate),
+                _ => item(icons::RELOAD, "Check for updates", "", Cmd::CheckUpdate),
+            }),
+            Row::Item(item(icons::INFO, &format!("About Goat   v{}", env!("CARGO_PKG_VERSION")), "", Cmd::OpenPage("settings#about"))),
             Row::Item(quit),
         ]
     }
