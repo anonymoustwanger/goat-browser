@@ -126,6 +126,12 @@ pub fn tween(ctx: &Context, id: Id, target: f32, dur: f32, ease: fn(f32) -> f32)
     tw.from + (tw.to - tw.from) * ease(k)
 }
 
+/// Put a tween at `value` right now (e.g. a tab you're dragging), so it animates on from there.
+pub fn set(ctx: &Context, id: Id, value: f32) {
+    let now = ctx.input(|i| i.time);
+    ctx.data_mut(|d| d.insert_temp(id, Tw { from: value, to: value, start: now - 10.0, dur: 0.3 }));
+}
+
 /// 0→1 when `on`, eased; for hover highlights and fades.
 pub fn hover(ctx: &Context, id: Id, on: bool, dur: f32) -> f32 {
     tween(ctx, id, if on { 1.0 } else { 0.0 }, dur, out_cubic)

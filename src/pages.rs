@@ -175,6 +175,18 @@ pub fn handle(sh: &Arc<Shared>, req: Request<Vec<u8>>) -> Resp {
         }
         "/settings" => settings(&s, look, sh),
         "/tor" => tor_page(look),
+        // A site's cached icon (saved from your tabs).
+        "/favicon" => {
+            let host = query_param(&query, "host").unwrap_or_default();
+            match std::fs::read(crate::store::favicon_path(&host)) {
+                Ok(b) if !host.is_empty() => {
+                    let mut r = respond(200, "image/png", b);
+                    r.headers_mut().insert("Cache-Control", "max-age=3600".parse().unwrap());
+                    r
+                }
+                _ => respond(404, "text/plain", Vec::new()),
+            }
+        }
         "/neterror" => net_error(look, &query_param(&query, "u").unwrap_or_default(), query_param(&query, "e").and_then(|e| e.parse().ok()).unwrap_or(0)),
         _ => page(look, "Not found", "", "<main class=\"solo\"><h1>Page not found</h1></main>"),
     }
@@ -524,7 +536,79 @@ async function api(p, body) {
   return r.ok;
 }
 const $ = (id) => document.getElementById(id);
-</script>"#;
+// Goat's own dialogs (instead of the engine's confirm / alert / prompt boxes).
+// goatDialog({title, text, ok, cancel, danger, fields: [{label, value}]}) → true/false, or the
+// field values (null when cancelled).
+function goatDialog(o) {
+  return new Promise((done) => {
+    const bg = document.createElement('div');
+    bg.className = 'gdlg-bg';
+    const box = document.createElement('div');
+    box.className = 'gdlg';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    const h = document.createElement('h3'); h.textContent = o.title || '';
+    const p = document.createElement('p'); p.textContent = o.text || '';
+    if (o.title) box.append(h);
+    if (o.text) box.append(p);
+    const inputs = (o.fields || []).map((f) => {
+      const l = document.createElement('label'); l.textContent = f.label;
+      const i = document.createElement('input'); i.value = f.value || ''; i.spellcheck = false;
+      l.append(i); box.append(l); return i;
+    });
+    const row = document.createElement('div'); row.className = 'gdlg-btns';
+    const no = document.createElement('button'); no.type = 'button'; no.textContent = o.cancel || 'Cancel';
+    const yes = document.createElement('button'); yes.type = 'button'; yes.textContent = o.ok || 'OK';
+    yes.className = o.danger ? 'gdlg-danger' : 'gdlg-ok';
+    if (o.cancel !== false) row.append(no);
+    row.append(yes); box.append(row); bg.append(box); document.body.append(bg);
+    const close = (v) => {
+      removeEventListener('keydown', key, true);
+      bg.classList.add('out');
+      setTimeout(() => bg.remove(), 160);
+      done(v);
+    };
+    const key = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(o.fields ? null : false); }
+      else if (e.key === 'Enter') { e.preventDefault(); yes.click(); }
+    };
+    addEventListener('keydown', key, true);
+    no.onclick = () => close(o.fields ? null : false);
+    yes.onclick = () => close(o.fields ? inputs.map((i) => i.value) : true);
+    bg.addEventListener('pointerdown', (e) => { if (e.target === bg) close(o.fields ? null : false); });
+    (inputs[0] || yes).focus();
+    if (inputs[0]) inputs[0].select();
+  });
+}
+const ask = (text, ok, danger) => goatDialog({text, ok: ok || 'OK', danger});
+// Site icon didn't load: try the site's own /favicon.ico once, then show the letter.
+function goatIconFail(img) {
+  if (!img.dataset.t) { img.dataset.t = '1'; img.src = 'https://' + img.dataset.h + '/favicon.ico'; return; }
+  const p = img.parentNode; p.classList.remove('hasimg'); p.textContent = img.dataset.l;
+}
+const tell = (text) => goatDialog({text, ok: 'OK', cancel: false});
+</script>
+<style>
+.gdlg-bg { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, .35); backdrop-filter: blur(2px); animation: gfade .16s ease both; }
+.gdlg-bg.out { animation: gfadeout .16s ease both; }
+@keyframes gfade { from { opacity: 0; } }
+@keyframes gfadeout { to { opacity: 0; } }
+.gdlg { width: min(420px, calc(100vw - 40px)); padding: 20px 20px 16px; border-radius: 16px; background: var(--bg-2); color: var(--text); border: 1px solid var(--line);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45); animation: gpop .32s cubic-bezier(.34, 1.56, .64, 1) both; font-size: 14px; }
+@keyframes gpop { from { transform: scale(.88); opacity: 0; } }
+.gdlg h3 { margin: 0 0 6px; font-size: 16px; }
+.gdlg p { margin: 0 0 14px; color: var(--muted); line-height: 1.5; white-space: pre-line; }
+.gdlg label { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+.gdlg input { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; outline: none; }
+.gdlg input:focus { border-color: var(--accent); }
+.gdlg-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.gdlg-btns button { font: inherit; font-size: 13.5px; border-radius: 10px; padding: 8px 16px; cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  transition: transform .25s cubic-bezier(.34, 1.56, .64, 1), filter .12s ease; }
+.gdlg-btns button:hover { transform: scale(1.05); }
+.gdlg-btns button:active { transform: scale(.96); }
+.gdlg-btns .gdlg-ok { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); font-weight: 600; }
+.gdlg-btns .gdlg-danger { background: var(--danger); border-color: transparent; color: #fff; font-weight: 600; }
+</style>"#;
 
 fn page_doc(look: &Look, title: &str, body_class: &str, extra_css: &str, body: &str) -> Resp {
     let html = format!(
@@ -542,6 +626,20 @@ fn page_doc(look: &Look, title: &str, body_class: &str, extra_css: &str, body: &
 /// Plain page for small messages.
 fn page(look: &Look, title: &str, _active: &str, main: &str) -> Resp {
     page_doc(look, title, "", "", &format!("<main>{main}</main>"))
+}
+
+/// A site's icon for a tile or list row (cached from your visits, else the site's
+/// /favicon.ico), falling back to `letter` when there isn't one or icons are off.
+fn icon_html(letter: &str, url: &str, on: bool) -> String {
+    let host = short_host(url);
+    if !on || host.is_empty() || !(url.starts_with("https://") || url.starts_with("http://")) {
+        return esc(letter);
+    }
+    let h = esc(&host_of(url));
+    format!(
+        "<img class=\"sicon\" alt=\"\" loading=\"lazy\" src=\"{INTERNAL_BASE}/favicon?host={h}\" data-h=\"{h}\" data-l=\"{}\" onload=\"this.parentNode.classList.add('hasimg')\" onerror=\"goatIconFail(this)\">",
+        esc(letter)
+    )
 }
 
 /// First letter of a bookmark's name (falls back to its site).
@@ -592,7 +690,7 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
             esc(&b.url),
             b.id,
             esc(&b.title),
-            esc(&name_letter(&b.title, &b.url)),
+            icon_html(&name_letter(&b.title, &b.url), &b.url, s.data.settings.site_icons),
             esc(&b.title),
         ));
     }
@@ -817,7 +915,7 @@ fn history(s: &Store, look: &Look, q: &str) -> Resp {
             fmt_time(v.time),
             esc(&v.url),
             esc(&v.url),
-            esc(&site_letter(&title, &v.url)),
+            icon_html(&site_letter(&title, &v.url), &v.url, s.data.settings.site_icons),
             esc(&title),
             esc(&host),
             esc(&key),
@@ -870,7 +968,7 @@ $('delsel').onclick = async () => {{
 }};
 $('range').onchange = async () => {{
   const r = $('range').value; if (!r) return;
-  if (r !== 'all' || confirm('Clear all browsing history?')) {{ await api('history/clear_range', {{range: r}}); location.reload(); }}
+  if (r !== 'all' || await ask('Clear all browsing history?', 'Clear history', true)) {{ await api('history/clear_range', {{range: r}}); location.reload(); }}
   else $('range').value = '';
 }};
 if ($('q').value) $('q').dispatchEvent(new Event('input'));
@@ -891,7 +989,7 @@ fn bookmarks(s: &Store, look: &Look) -> Resp {
             esc(&format!("{} {}", b.title, b.url).to_lowercase()),
             esc(&b.url),
             esc(&b.url),
-            esc(&name_letter(&b.title, &b.url)),
+            icon_html(&name_letter(&b.title, &b.url), &b.url, s.data.settings.site_icons),
             esc(&b.title),
             esc(&short_host(&b.url)),
             b.id,
@@ -915,10 +1013,10 @@ fn bookmarks(s: &Store, look: &Look) -> Resp {
 </div>
 {LIST_JS}
 <script>
-function edit(id, title, url) {{
-  const t = prompt('Name', title); if (t === null) return;
-  const u = prompt('Address', url); if (u === null) return;
-  api('bookmark/edit', {{id, title: t, url: u}}).then(() => location.reload());
+async function edit(id, title, url) {{
+  const v = await goatDialog({{title: 'Edit bookmark', ok: 'Save', fields: [{{label: 'Name', value: title}}, {{label: 'Address', value: url}}]}});
+  if (!v) return;
+  api('bookmark/edit', {{id, title: v[0], url: v[1]}}).then(() => location.reload());
 }}
 </script>"#,
         navlinks("bookmarks"),
@@ -1163,6 +1261,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         <span><b>Theme</b><small>Applies to the toolbar, Goat's own pages, and tells websites to use dark or light mode.</small></span>
         <div class="themes" role="radiogroup" aria-label="Theme">THEMES</div>
       </div>
+      <label class="row"><span><b>Site icons</b><small>Show each site's icon on tabs and bookmarks. Off shows the first letter instead.</small></span>
+        TOGGLE_SITEICONS
+      </label>
       <div class="row col" id="editor" hidden>
         <span><b id="editortitle">New theme</b><small>Pick five colors. The rest are worked out for you.</small></span>
         <div class="editor">
@@ -1402,9 +1503,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     <h2>Clear data</h2>
     <div class="card">
       <div class="row"><span><b>Browsing history</b><small>Every page in your history.</small></span>
-        <button class="danger" onclick="if(confirm('Clear all browsing history?'))api('history/clear').then(()=>{this.textContent='Cleared'})">Clear history</button></div>
+        <button class="danger" onclick="ask('Clear all browsing history?','Clear history',true).then(ok=>ok&&api('history/clear').then(()=>{this.textContent='Cleared'}))">Clear history</button></div>
       <div class="row"><span><b>Cookies, cache and site data</b><small>Signs you out of websites.</small></span>
-        <button class="danger" onclick="if(confirm('Clear cookies, cache, site data and history? You will be signed out of websites.'))api('clear_all').then(()=>{this.textContent='Cleared'})">Clear everything</button></div>
+        <button class="danger" onclick="ask('Clear cookies, cache, site data and history? You will be signed out of websites.','Clear everything',true).then(ok=>ok&&api('clear_all').then(()=>{this.textContent='Cleared'}))">Clear everything</button></div>
     </div>
   </section>
 
@@ -1456,8 +1557,8 @@ async function setStartProfile(v) {
 }
 async function openProfile(name) { await api('profiles/open', {title: name}); }
 async function deleteProfile(name) {
-  if (!confirm('Delete the profile “' + name + '”? Its cookies, history, bookmarks and extensions are deleted. This can\'t be undone.')) return;
-  if (await api('profiles/delete', {title: name})) location.reload(); else alert('Close that profile\'s window first.');
+  if (!await goatDialog({title: 'Delete the profile “' + name + '”?', text: 'Its cookies, history, bookmarks and extensions are deleted. This can\'t be undone.', ok: 'Delete profile', danger: true})) return;
+  if (await api('profiles/delete', {title: name})) location.reload(); else tell('Close that profile\'s window first.');
 }
 $('profform').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1507,7 +1608,7 @@ $('ed-save').onclick = async () => {
 };
 $('ed-delete').onclick = async () => {
   const t = CUSTOM.find(x => x.id === editing);
-  if (!t || !confirm('Delete the theme “' + t.name + '”?')) return;
+  if (!t || !await ask('Delete the theme “' + t.name + '”?', 'Delete theme', true)) return;
   const patch = {custom_themes: CUSTOM.filter(x => x.id !== editing)};
   if (CURTHEME === editing) patch.theme = 'system';
   if (await api('settings', patch)) location.reload();
@@ -1554,7 +1655,7 @@ async function privext(folder, on) {
   $('extmsg').textContent = on ? 'Runs in private windows opened from now on.' : 'Off in private windows opened from now on.';
 }
 async function rmext(folder) {
-  if (!confirm('Remove this extension?')) return;
+  if (!await ask('Remove this extension?', 'Remove', true)) return;
   await api('extensions/remove', {title: folder});
   $('extmsg').textContent = 'Removed. Restart Goat to finish.'; $('restart').hidden = false;
   setTimeout(() => location.reload(), 900);
@@ -1599,7 +1700,7 @@ function cookieRow(c) {
     try {
       await cookieApi({op: 'set', cookie: {...c, value: value.value}, original: c});
       c.value = value.value; value.classList.add('ok'); setTimeout(() => value.classList.remove('ok'), 900);
-    } catch (e) { alert(e.message); value.value = c.value; }
+    } catch (e) { tell(e.message); value.value = c.value; }
   };
   value.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); value.blur(); } });
   value.addEventListener('change', save);
@@ -1612,7 +1713,7 @@ function cookieRow(c) {
     el('td', {class: 'rowbtns'},
       el('button', {class: 'x', title: 'Edit everything', 'aria-label': 'Edit cookie ' + c.name, onclick: () => openCookieForm(c)}, '✎'),
       el('button', {class: 'x', title: 'Delete cookie', 'aria-label': 'Delete cookie ' + c.name, onclick: async () => {
-        try { await cookieApi({op: 'delete', cookie: c}); cookies = cookies.filter((x) => x !== c); renderCookies(); } catch (e) { alert(e.message); }
+        try { await cookieApi({op: 'delete', cookie: c}); cookies = cookies.filter((x) => x !== c); renderCookies(); } catch (e) { tell(e.message); }
       }}, '×')),
   );
 }
@@ -1637,7 +1738,7 @@ function renderCookies() {
       el('button', {class: 'sitebtn', 'aria-expanded': String(!!isOpen), onclick: () => { openSites.has(h) ? openSites.delete(h) : openSites.add(h); renderCookies(); }},
         el('span', {class: 'caret'}, '›'), el('span', {class: 'host'}, h), el('span', {class: 'muted'}, String(items.length))),
       el('button', {class: 'linkdanger', onclick: async () => {
-        try { await cookieApi({op: 'delete_site', domain: h}); cookies = cookies.filter((c) => chost(c) !== h); renderCookies(); } catch (e) { alert(e.message); }
+        try { await cookieApi({op: 'delete_site', domain: h}); cookies = cookies.filter((c) => chost(c) !== h); renderCookies(); } catch (e) { tell(e.message); }
       }}, 'Delete site')));
     if (isOpen) {
       list.append(el('div', {class: 'tablewrap'}, el('table', {},
@@ -1685,8 +1786,8 @@ $('cookieform').addEventListener('submit', async (e) => {
 $('cookiesearch').addEventListener('input', renderCookies);
 $('cookiereload').onclick = loadCookies;
 $('cookieclear').onclick = async () => {
-  if (!confirm('Delete all cookies? You will be signed out of every site.')) return;
-  try { await cookieApi({op: 'delete_all'}); } catch (e) { alert(e.message); }
+  if (!await ask('Delete all cookies? You will be signed out of every site.', 'Delete all', true)) return;
+  try { await cookieApi({op: 'delete_all'}); } catch (e) { tell(e.message); }
   loadCookies();
 };
 loadCookies();
@@ -1807,6 +1908,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_CLEAR", &toggle("clear_cookies_on_exit", st.clear_cookies_on_exit))
         .replace("TOGGLE_PASTE", &toggle("paste_uploads", st.paste_uploads))
         .replace("TOGGLE_AUTOUPDATE", &toggle("auto_update", st.auto_update))
+        .replace("TOGGLE_SITEICONS", &toggle("site_icons", st.site_icons))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

@@ -699,3 +699,39 @@ pub fn set_extensions_enabled(webview: &wry::WebView, wanted: Vec<(String, bool)
         let _ = p7.GetBrowserExtensions(&handler);
     }
 }
+
+/// The page's icon as PNG bytes, each time it changes.
+pub fn watch_favicon(webview: &wry::WebView, on_png: impl Fn(Vec<u8>) + Clone + 'static) {
+    unsafe {
+        let Ok(c15) = webview.webview().cast::<ICoreWebView2_15>() else { return };
+        let handler = webview2_com::FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+            let Some(wv) = sender else { return Ok(()) };
+            let Ok(c15) = wv.cast::<ICoreWebView2_15>() else { return Ok(()) };
+            let cb = on_png.clone();
+            let done = webview2_com::GetFaviconCompletedHandler::create(Box::new(move |hr, stream| {
+                let Some(stream) = stream.filter(|_| hr.is_ok()) else { return Ok(()) };
+                let mut out = Vec::new();
+                let mut buf = [0u8; 16 * 1024];
+                loop {
+                    let mut n = 0u32;
+                    let r = stream.Read(buf.as_mut_ptr() as *mut _, buf.len() as u32, Some(&mut n));
+                    if r.is_err() || n == 0 {
+                        break;
+                    }
+                    out.extend_from_slice(&buf[..n as usize]);
+                    if out.len() > 2 << 20 {
+                        return Ok(());
+                    }
+                }
+                if !out.is_empty() {
+                    cb(out);
+                }
+                Ok(())
+            }));
+            let _ = c15.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &done);
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = c15.add_FaviconChanged(&handler, &mut token);
+    }
+}

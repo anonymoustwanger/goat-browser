@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "goat"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "adblock",
  "arboard",
@@ -1531,6 +1531,7 @@ dependencies = [
  "egui",
  "flate2",
  "gtk",
+ "image",
  "open",
  "png",
  "raw-window-handle",

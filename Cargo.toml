@@ -1,6 +1,6 @@
 [package]
 name = "goat"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2021"
 description = "A Rust web browser built on WebView2"
 license-file = "LICENSE"
@@ -22,6 +22,7 @@ egui = "0.37"
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "x11", "wayland"] }
 png = "0.18"
 arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 

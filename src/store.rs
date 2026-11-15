@@ -70,6 +70,8 @@ pub struct Settings {
     pub paste_uploads: bool,
     /// Download new versions in the background and install them when Goat closes.
     pub auto_update: bool,
+    /// Site icons on tabs and bookmarks (off: the first letter instead).
+    pub site_icons: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -132,6 +134,7 @@ impl Default for Settings {
             disabled_extensions: Vec::new(),
             paste_uploads: true,
             auto_update: true,
+            site_icons: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
@@ -404,6 +407,12 @@ pub fn profiles() -> Vec<String> {
 /// mix that with the normal windows' engine, so it has its own browsing data ("profile-nogpu").
 pub fn no_gpu_window() -> bool {
     launch().window == "nogpu"
+}
+
+/// Where a site's icon is cached (saved from the tab the first time you visit it).
+pub fn favicon_path(host: &str) -> PathBuf {
+    let safe: String = host.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
+    profile_dir().join("data").join("favicons").join(format!("{safe}.png"))
 }
 
 /// The web engine's data folder for normal tabs in this window.

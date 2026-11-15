@@ -64,6 +64,8 @@ pub const INTERNAL_BASE: &str = "goatr://localhost";
 #[derive(Debug)]
 pub enum Ev {
     PageFailed(u32, &'static str),
+    /// The page's icon changed (PNG).
+    Favicon(u32, Vec<u8>),
     Redirect(u32, String),
     Eval(u32, String),
     ExtIds(Vec<(String, String)>),
@@ -137,6 +139,10 @@ pub enum Cmd {
     InstallUpdate,
     /// Look for a new version now.
     CheckUpdate,
+    /// Drag a tab to a new place in the strip.
+    MoveTab(u32, usize),
+    /// A tab dropped outside the strip: into another Goat window, or a new window of its own.
+    TearOff(u32),
     /// Set the active tab's volume (1.0 = 100%).
     SetVolume(f32),
     /// Right-click menu: run the engine's own command (copy, paste, save image…).
@@ -271,6 +277,8 @@ pub struct Tab {
     /// Its first page has drawn (until then the web view stays hidden, so no white flash).
     pub painted: bool,
     pub playing: bool,
+    /// The page's icon: (site it's for, picture).
+    pub favicon: Option<(String, egui::TextureHandle)>,
 }
 
 /// Browser profiles: the normal one (saved) and an in-memory one for Tor tabs.
@@ -363,6 +371,10 @@ pub struct App {
     closed: Vec<(String, TabKind)>,
     pub ghosts: Vec<Ghost>,
     pub tab_rects: std::collections::HashMap<u32, Rect>,
+    /// The tab being dragged: (id, where in the tab it was grabbed, has it moved).
+    pub tab_drag: Option<(u32, f32, bool)>,
+    /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
+    pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
     pub popup_closing: Option<(Popup, Pos2, f64)>,
     /// Which pop-up last closed by itself (focus moved away) and when.
@@ -425,7 +437,8 @@ fn main() -> eframe::Result<()> {
     let _ = gtk::init();
     let launch = store::launch().clone();
     // "Always open this profile": hand over to that profile's window straight away.
-    if launch.window.is_empty() && launch.profile.is_empty() && store::profiles().len() > 1 {
+    let new_window = std::env::args().any(|a| a == "--new-window");
+    if !new_window && launch.window.is_empty() && launch.profile.is_empty() && store::profiles().len() > 1 {
         if let Some(p) = store::startup_profile().filter(|p| !p.is_empty()) {
             if let Ok(exe) = std::env::current_exe() {
                 let mut cmd = std::process::Command::new(exe);
@@ -441,7 +454,7 @@ fn main() -> eframe::Result<()> {
     }
     // Goat is already open (same profile): hand the link to it instead of opening a window.
     #[cfg(windows)]
-    if launch.window.is_empty() {
+    if launch.window.is_empty() && !std::env::args().any(|a| a == "--new-window") {
         if let Some(u) = &launch.url {
             if instance::forward(&launch.profile, u) {
                 return Ok(());
@@ -601,6 +614,8 @@ fn main() -> eframe::Result<()> {
                 closed: Vec::new(),
                 ghosts: Vec::new(),
                 tab_rects: Default::default(),
+                tab_drag: None,
+                site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
                 popup_ready_for: None,
@@ -642,6 +657,23 @@ fn main() -> eframe::Result<()> {
                     })
                 });
             }
+            // Tabs dragged in from other Goat windows (same profile and kind only).
+            #[cfg(windows)]
+            {
+                let sh = app.sh.clone();
+                let my_kind = match window_kind {
+                    TabKind::Normal => "normal",
+                    TabKind::Private => "private",
+                    TabKind::Tor => "tor",
+                };
+                instance::listen_window(move |kind, profile, url| {
+                    let ok = kind == my_kind && profile == store::launch().profile;
+                    if ok {
+                        (sh.notify)(shared::Notice::TabIn(url));
+                    }
+                    ok
+                });
+            }
             // No-GPU window: start with the normal window's cookies (logins carry over).
             #[cfg(windows)]
             if store::no_gpu_window() {
@@ -660,6 +692,7 @@ fn main() -> eframe::Result<()> {
             });
             // More than one profile and no "always open": ask which one first.
             let ask = window_kind == TabKind::Normal
+                && !std::env::args().any(|a| a == "--new-window")
                 && store::launch().window.is_empty()
                 && store::launch().profile.is_empty()
                 && store::profiles().len() > 1
@@ -1087,6 +1120,13 @@ impl App {
                 let (tx, c) = (self.tx.clone(), self.ctx.clone());
                 {
                     let (tx, c) = (tx.clone(), c.clone());
+                    winhooks::watch_favicon(&webview, move |png| {
+                        let _ = tx.send(Ev::Favicon(id, png));
+                        c.request_repaint();
+                    });
+                }
+                {
+                    let (tx, c) = (tx.clone(), c.clone());
                     winhooks::watch_audio(&webview, move |playing| {
                         let _ = tx.send(Ev::Audio(id, playing));
                         c.request_repaint();
@@ -1128,6 +1168,7 @@ impl App {
             volume: 1.0,
             painted: false,
             playing: false,
+            favicon: None,
             born: now(&self.ctx),
         });
         self.active = self.tabs.len() - 1;
@@ -1178,6 +1219,73 @@ impl App {
             };
             self.select(next);
         }
+    }
+
+    /// A tab dragged out of the strip and let go: into the Goat window under the mouse (same
+    /// profile and kind), or, over anything else, a window of its own.
+    fn tear_off(&mut self, id: u32) {
+        let Some(i) = self.tab_index(id) else { return };
+        let (url, kind) = (self.tabs[i].url.clone(), self.tabs[i].kind);
+        let kind_s = match kind {
+            TabKind::Normal => "normal",
+            TabKind::Private => "private",
+            TabKind::Tor => "tor",
+        };
+        #[cfg(windows)]
+        {
+            let me = std::process::id();
+            if let Some((x, y)) = winhooks::cursor_pos() {
+                match instance::window_pid_at(x, y) {
+                    Some(pid) if pid == me => return,
+                    Some(pid) => {
+                        if instance::send_tab(pid, kind_s, &store::launch().profile, &url) {
+                            self.close(id);
+                            return;
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        // Somewhere else: its own window (a lone tab just stays put).
+        if self.tabs.len() > 1 {
+            let window = match kind {
+                TabKind::Normal if store::no_gpu_window() => Some("nogpu"),
+                TabKind::Normal => None,
+                TabKind::Private => Some("private"),
+                TabKind::Tor => Some("tor"),
+            };
+            if let Ok(exe) = std::env::current_exe() {
+                let mut cmd = std::process::Command::new(exe);
+                cmd.arg("--new-window");
+                if let Some(w) = window {
+                    cmd.args(["--window", w]);
+                }
+                let prof = store::launch().profile.clone();
+                if !prof.is_empty() {
+                    cmd.args(["--profile", &prof]);
+                }
+                cmd.arg(&url);
+                if cmd.spawn().is_ok() {
+                    self.close(id);
+                }
+            }
+        }
+        let _ = kind_s;
+    }
+
+    /// A site's icon (from an open tab or the cache), when site icons are on.
+    pub fn site_icon(&self, url: &str) -> Option<egui::TextureId> {
+        if !self.settings().site_icons {
+            return None;
+        }
+        let host = store::host_of(url);
+        if host.is_empty() {
+            return None;
+        }
+        let mut m = self.site_icons.borrow_mut();
+        let e = m.entry(host.clone()).or_insert_with(|| std::fs::read(store::favicon_path(&host)).ok().and_then(|b| decode_icon(&self.ctx, &host, &b)));
+        e.as_ref().map(|t| t.id())
     }
 
     fn eval_active(&self, js: &str) {
@@ -1345,6 +1453,25 @@ impl App {
                     self.toast(format!("This extension couldn't start: {e}"));
                 }
             },
+            Ev::Favicon(id, png) => {
+                if let Some(i) = self.tab_index(id) {
+                    let url = self.tabs[i].page_url.lock().unwrap().clone();
+                    let host = store::host_of(&url);
+                    if host.is_empty() || url.starts_with(INTERNAL_BASE) {
+                        return;
+                    }
+                    if let Some(tex) = decode_icon(&self.ctx, &host, &png) {
+                        self.tabs[i].favicon = Some((host.clone(), tex.clone()));
+                        self.site_icons.borrow_mut().insert(host.clone(), Some(tex));
+                        // Kept for bookmarks (not from private or Tor tabs).
+                        if self.tabs[i].kind == TabKind::Normal && !store::READ_ONLY.load(Ordering::Relaxed) {
+                            let p = store::favicon_path(&host);
+                            let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
+                            let _ = std::fs::write(p, &png);
+                        }
+                    }
+                }
+            }
             Ev::Audio(id, playing) => {
                 if let Some(i) = self.tab_index(id) {
                     self.tabs[i].playing = playing;
@@ -1447,6 +1574,13 @@ impl App {
             Ev::Load(id, done, url) => {
                 if done {
                     self.show_painted(id);
+                }
+                // A different site: its own icon comes with FaviconChanged (none until then).
+                if let Some(i) = self.tab_index(id) {
+                    let host = store::host_of(&url);
+                    if self.tabs[i].favicon.as_ref().is_some_and(|(h, _)| *h != host) {
+                        self.tabs[i].favicon = None;
+                    }
                 }
                 // Goat's own pages get the theme colour behind them (no white flash);
                 // websites get white, like every browser, for pages with no background of their own.
@@ -1600,6 +1734,12 @@ impl App {
                     }
                     #[cfg(not(windows))]
                     let _ = list;
+                }
+                Notice::TabIn(url) => {
+                    if let Err(e) = self.open_tab(frame, &url, self.window_kind) {
+                        self.toast(format!("Couldn't open tab: {e}"));
+                    }
+                    self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
                 }
                 Notice::External(raw) => {
                     let url = resolve_input(&self.settings(), &raw);
@@ -1768,6 +1908,20 @@ impl App {
             }
             Cmd::OpenProfile(name) => self.spawn_window(None, Some(&name), None),
             Cmd::CloseTab(id) => self.close(id),
+            Cmd::MoveTab(id, to) => {
+                if let Some(from) = self.tab_index(id) {
+                    let to = to.min(self.tabs.len() - 1);
+                    if from != to {
+                        let active_id = self.tabs.get(self.active).map(|t| t.id);
+                        let t = self.tabs.remove(from);
+                        self.tabs.insert(to, t);
+                        if let Some(a) = active_id.and_then(|a| self.tab_index(a)) {
+                            self.active = a;
+                        }
+                    }
+                }
+            }
+            Cmd::TearOff(id) => self.tear_off(id),
             Cmd::SelectTab(id) => {
                 if let Some(i) = self.tab_index(id) {
                     self.select(i);
@@ -2762,4 +2916,15 @@ fn clipboard_image() -> Option<(String, &'static str, u32, u32)> {
     };
     let bytes = std::fs::read(path).ok().filter(|b| b.len() < 40 << 20)?;
     Some((b64(&bytes), mime, 0, 0))
+}
+
+/// A PNG icon as a texture (None if it can't be read).
+fn decode_icon(ctx: &egui::Context, host: &str, png: &[u8]) -> Option<egui::TextureHandle> {
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 || w > 1024 || h > 1024 {
+        return None;
+    }
+    let ci = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], img.as_raw());
+    Some(ctx.load_texture(format!("fav-{host}"), ci, egui::TextureOptions::LINEAR))
 }

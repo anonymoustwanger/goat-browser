@@ -145,3 +145,88 @@ pub fn listen(profile: &str, on_req: impl Fn(Request) + Send + 'static) {
         })
         .ok();
 }
+
+/// Each window's own pipe (by process id), for tabs dragged in from another Goat window.
+fn pid_pipe(pid: u32) -> String {
+    let user: String = std::env::var("USERNAME").unwrap_or_default().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    format!(r"\\.\pipe\Goat-{user}-window-{pid}")
+}
+
+/// Hand a tab to the Goat window in process `pid`. True if it took it (same profile and kind).
+#[cfg(windows)]
+pub fn send_tab(pid: u32, kind: &str, profile: &str, url: &str) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(pid_pipe(pid)) else { return false };
+    if f.write_all(format!("tab\n{kind}\n{profile}\n{url}\n").as_bytes()).is_err() {
+        return false;
+    }
+    let mut out = String::new();
+    let _ = f.read_to_string(&mut out);
+    out.trim() == "ok"
+}
+
+/// Accept tabs dragged from other Goat windows: `accept(kind, profile, url)` says yes or no.
+#[cfg(windows)]
+pub fn listen_window(accept: impl Fn(String, String, String) -> bool + Send + 'static) {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
+    use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT};
+    let name = HSTRING::from(pid_pipe(std::process::id()));
+    std::thread::Builder::new()
+        .name("goat-window-pipe".into())
+        .spawn(move || loop {
+            let pipe = unsafe {
+                CreateNamedPipeW(&name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 4096, 64 * 1024, 0, None)
+            };
+            if pipe == INVALID_HANDLE_VALUE || pipe.is_invalid() {
+                return;
+            }
+            let connected = unsafe { ConnectNamedPipe(pipe, None) }.is_ok() || std::io::Error::last_os_error().raw_os_error() == Some(535);
+            if connected {
+                let mut data = Vec::new();
+                let mut buf = [0u8; 8192];
+                while data.iter().filter(|b| **b == b'\n').count() < 4 && data.len() < 64 * 1024 {
+                    let mut n = 0u32;
+                    if unsafe { ReadFile(pipe, Some(&mut buf), Some(&mut n), None) }.is_err() || n == 0 {
+                        break;
+                    }
+                    data.extend_from_slice(&buf[..n as usize]);
+                }
+                let text = String::from_utf8_lossy(&data).into_owned();
+                let mut lines = text.split('\n');
+                let ok = match (lines.next(), lines.next(), lines.next(), lines.next()) {
+                    (Some("tab"), Some(kind), Some(profile), Some(url)) if !url.is_empty() => accept(kind.into(), profile.into(), url.into()),
+                    _ => false,
+                };
+                let reply: &[u8] = if ok { b"ok" } else { b"no" };
+                let mut w = 0u32;
+                unsafe {
+                    let _ = WriteFile(pipe, Some(reply), Some(&mut w), None);
+                    let _ = FlushFileBuffers(pipe);
+                    let _ = DisconnectNamedPipe(pipe);
+                }
+            }
+            unsafe {
+                let _ = CloseHandle(pipe);
+            }
+        })
+        .ok();
+}
+
+/// The Goat window process under a screen point, if it's another Goat window.
+#[cfg(windows)]
+pub fn window_pid_at(x: f32, y: f32) -> Option<u32> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
+    unsafe {
+        let h = WindowFromPoint(POINT { x: x as i32, y: y as i32 });
+        if h.is_invalid() {
+            return None;
+        }
+        let root = GetAncestor(h, GA_ROOT);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(if root.is_invalid() { h } else { root }, Some(&mut pid));
+        (pid != 0).then_some(pid)
+    }
+}

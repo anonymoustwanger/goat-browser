@@ -118,3 +118,10 @@ body.private .facts { display: none; }
   transition: background-color var(--dur-1) ease, transform .25s cubic-bezier(.34, 1.56, .64, 1); }
 .tmenu button:hover, .tmenu button:focus-visible { background: var(--bg-3); transform: scale(1.03); outline: none; }
 .tmenu button.danger { color: var(--danger); }
+
+/* site icons on tiles and list rows */
+.ticon.hasimg { background: var(--bg-2) !important; box-shadow: none !important; border: 1px solid var(--line); }
+.ticon img.sicon { width: 26px; height: 26px; border-radius: 6px; object-fit: contain; }
+.hico.hasimg { background: none !important; }
+.hico img.sicon { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; }
+.tile, .tile:hover { text-decoration: none; }

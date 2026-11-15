@@ -37,6 +37,8 @@ pub enum Notice {
     CookiesGet(std::sync::mpsc::Sender<String>),
     /// Cookies from the other window to add here.
     CookiesPut(Vec<CookieInfo>),
+    /// A tab dragged here from another Goat window.
+    TabIn(String),
     /// An update check finished (true = you asked for it).
     UpdateChecked(Result<crate::updater::Found, String>, bool),
 }

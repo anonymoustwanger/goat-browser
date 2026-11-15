@@ -444,7 +444,16 @@ impl App {
         // The active-tab highlight slides from tab to tab.
         if let Some(t) = self.tabs.get(self.active) {
             let target_x = strip.left() + 8.0 + self.active as f32 * (tab_w + 2.0);
-            let hx = anim::tween(&ctx, Id::new("active-x"), target_x, 0.34, anim::spring);
+            let mut hx = anim::tween(&ctx, Id::new("active-x"), target_x, 0.34, anim::spring);
+            // Dragging the active tab: the highlight goes with it.
+            if let (Some((did, grab, _)), Some(p)) = (self.tab_drag, ctx.input(|i| i.pointer.interact_pos())) {
+                if did == t.id {
+                    let min_x = strip.left() + 8.0;
+                    let max_x = (controls.left() - 40.0 - tab_w).max(min_x);
+                    hx = (p.x - grab).clamp(min_x, max_x);
+                    anim::set(&ctx, Id::new("active-x"), hx);
+                }
+            }
             let hw = anim::tween(&ctx, Id::new("active-w"), tab_w, 0.34, anim::spring);
             let tint = anim::tween(&ctx, Id::new("active-tint"), if t.kind == TabKind::Normal { 0.0 } else { 1.0 }, 0.26, anim::out_cubic);
             let kc = kind_color(t.kind).unwrap_or(PV);
@@ -455,22 +464,53 @@ impl App {
             p.line_segment([r.left_top() + vec2(9.0, 0.5), r.right_top() + vec2(-9.0, 0.5)], Stroke::new(1.0, alpha(pal.text, 0.06)));
         }
         let mut prev_lit = true;
-        let tabs: Vec<(u32, String, String, bool, TabKind, f64)> =
-            self.tabs.iter().map(|t| (t.id, t.title.clone(), t.url.clone(), t.loading, t.kind, t.born)).collect();
+        let icons_on = self.settings().site_icons;
+        let tabs: Vec<(u32, String, String, bool, TabKind, f64, Option<egui::TextureId>)> = self
+            .tabs
+            .iter()
+            .map(|t| (t.id, t.title.clone(), t.url.clone(), t.loading, t.kind, t.born, t.favicon.as_ref().filter(|_| icons_on).map(|f| f.1.id())))
+            .collect();
         let mut rects = std::collections::HashMap::new();
-        for (i, (id, title, url, loading, kind, born)) in tabs.into_iter().enumerate() {
+        for (i, (id, title, url, loading, kind, born, icon)) in tabs.into_iter().enumerate() {
             let tid = Id::new(("tab", id));
             // Tabs glide to their slot when others open or close.
-            let ax = anim::tween(&ctx, tid.with("x"), x, 0.32, anim::spring);
+            let mut ax = anim::tween(&ctx, tid.with("x"), x, 0.32, anim::spring);
             let aw = anim::tween(&ctx, tid.with("w"), tab_w, 0.24, anim::out_expo);
             let rect = Rect::from_min_size(pos2(ax, strip.top() + 6.0), vec2(aw, 32.0));
             x += tab_w + 2.0;
+            let dragging_me = self.tab_drag.is_some_and(|d| d.0 == id);
             rects.insert(id, rect);
             let active = i == self.active;
             // Clickable right up to the top edge of the window (like the window buttons), so a
             // maximised window's tabs work with the mouse slammed against the top of the screen.
             let hit = Rect::from_min_max(pos2(rect.left(), strip.top()), rect.max);
-            let resp = ui.interact(hit, tid, Sense::click());
+            let resp = ui.interact(hit, tid, Sense::click_and_drag());
+            // Drag to reorder; drag out of the strip to move it to another window.
+            if resp.drag_started() {
+                if let Some(p) = ctx.input(|i| i.pointer.press_origin()) {
+                    self.tab_drag = Some((id, p.x - rect.left(), false));
+                }
+            }
+            let mut lift = 0.0;
+            if let Some((did, grab, _)) = self.tab_drag {
+                if did == id {
+                    if let Some(p) = ctx.input(|i| i.pointer.interact_pos()) {
+                        let min_x = strip.left() + 8.0;
+                        let max_x = (controls.left() - 40.0 - aw).max(min_x);
+                        ax = (p.x - grab).clamp(min_x, max_x);
+                        anim::set(&ctx, tid.with("x"), ax);
+                        let slot = ((ax - min_x + (tab_w + 2.0) / 2.0) / (tab_w + 2.0)).floor().max(0.0) as usize;
+                        if slot != i {
+                            cmds.push(Cmd::MoveTab(id, slot));
+                        }
+                        // Pulled down out of the strip: about to become its own window.
+                        lift = (p.y - strip.bottom()).max(0.0).min(24.0);
+                        if let Some(d) = self.tab_drag.as_mut() {
+                            d.2 = true;
+                        }
+                    }
+                }
+            }
             let close_rect = Rect::from_min_size(pos2(rect.right() - 6.0 - 22.0, rect.center().y - 11.0), Vec2::splat(22.0));
             let narrow = aw < 66.0;
             // Geometric hover (egui stops reporting hover on other widgets while a button is held).
@@ -498,12 +538,31 @@ impl App {
             let mut tp = p.clone();
             tp.set_opacity(anim::out_cubic(k * 1.6));
             // Goat's tab-in: rise from 8px below and grow from 94%, with a little spring.
-            let r = Rect::from_center_size(rect.center() + vec2(0.0, 8.0 * (1.0 - e)), rect.size() * (0.94 + 0.06 * e));
-            self.paint_tab(&tp, r, pal, &title, &url, loading, kind, active, hovered, narrow, show_close, close.hovered(), i > 0 && !prev_lit, tid, t_now, anim);
+            let r = Rect::from_center_size(rect.center() + vec2(0.0, 8.0 * (1.0 - e) + lift), rect.size() * (0.94 + 0.06 * e));
+            if dragging_me {
+                tp.set_opacity(if lift > 12.0 { 0.7 } else { 1.0 });
+                ctx.request_repaint();
+            }
+            self.paint_tab(&tp, r, pal, &title, &url, loading, kind, active, hovered, narrow, show_close, close.hovered(), i > 0 && !prev_lit, tid, t_now, anim, icon);
             prev_lit = active || hovered;
             resp.on_hover_text_at_pointer(&title);
         }
         self.tab_rects = rects;
+        // Let go of a dragged tab: well below the strip, or outside the window, it moves out.
+        if let Some((did, _, moved)) = self.tab_drag {
+            if !ctx.input(|i| i.pointer.primary_down()) {
+                self.tab_drag = None;
+                let p = ctx.input(|i| i.pointer.latest_pos());
+                let screen = ctx.input(|i| i.viewport_rect());
+                let out = match p {
+                    Some(p) => p.y > strip.bottom() + 40.0 || p.y < strip.top() - 10.0 || !screen.contains(p),
+                    None => true,
+                };
+                if moved && out {
+                    cmds.push(Cmd::TearOff(did));
+                }
+            }
+        }
         // Recently closed tabs fade out where they were.
         self.ghosts.retain(|g| t_now - g.born < 0.2);
         for g in &self.ghosts {
@@ -511,7 +570,7 @@ impl App {
             let mut gp = p.clone();
             gp.set_opacity((1.0 - anim::in_cubic(k)) * 0.9);
             let r = Rect::from_center_size(g.rect.center(), g.rect.size() * (1.0 - 0.1 * anim::out_cubic(k)));
-            self.paint_tab(&gp, r, pal, &g.title, &g.url, false, g.kind, false, false, false, false, false, false, Id::new(("ghost", g.born.to_bits())), t_now, anim);
+            self.paint_tab(&gp, r, pal, &g.title, &g.url, false, g.kind, false, false, false, false, false, false, Id::new(("ghost", g.born.to_bits())), t_now, anim, None);
             ctx.request_repaint();
         }
 
@@ -563,7 +622,7 @@ impl App {
     /// One tab, Goat style (also used for the fading "ghost" of a closed tab).
     #[allow(clippy::too_many_arguments)]
     fn paint_tab(&self, tp: &Painter, r: Rect, pal: &Palette, title: &str, url: &str, loading: bool, kind: TabKind, active: bool,
-                 hovered: bool, narrow: bool, show_close: bool, close_hovered: bool, sep: bool, tid: Id, t_now: f64, anim: bool) {
+                 hovered: bool, narrow: bool, show_close: bool, close_hovered: bool, sep: bool, tid: Id, t_now: f64, anim: bool, icon: Option<egui::TextureId>) {
         let ctx = &self.ctx;
         let nbg = nav_bg(pal);
         let tint = kind_color(kind);
@@ -599,6 +658,8 @@ impl App {
                 tp.rect_filled(dot, 5, alpha(c, 0.28));
                 let icon = if kind == TabKind::Tor { icons::ONION } else { icons::MASK };
                 icons::draw_filled(tp, dot.shrink(1.5), icon, c, 1.4, Some(alpha(c, 0.25)));
+            } else if let Some(tex) = icon {
+                tp.image(tex, dot, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             } else {
                 tp.rect_filled(dot, 5, pal.bg3);
                 let letter = if url.starts_with(INTERNAL_BASE) { title.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default() } else { site_letter(title, url) };
@@ -1244,8 +1305,12 @@ impl App {
                 p.rect_filled(r, 7, alpha(pal.bg3, h));
             }
             let ic = Rect::from_min_size(pos2(r.left() + 6.0, cy - 8.0), Vec2::splat(16.0));
-            p.rect_filled(ic, 4, pal.bg3);
-            p.text(ic.center(), Align2::CENTER_CENTER, name_letter(&title, &url), bold(9.5), pal.muted);
+            if let Some(tex) = self.site_icon(&url) {
+                p.image(tex, ic, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            } else {
+                p.rect_filled(ic, 4, pal.bg3);
+                p.text(ic.center(), Align2::CENTER_CENTER, name_letter(&title, &url), bold(9.5), pal.muted);
+            }
             text_elided(&p, pos2(ic.right() + 6.0, cy), &title, font(12.5), pal.text, tw + 1.0, Align2::LEFT_CENTER);
             let ctrl = ctx.input(|i| i.modifiers.command);
             if resp.clicked() {
