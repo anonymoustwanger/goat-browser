@@ -467,11 +467,14 @@ impl App {
             x += tab_w + 2.0;
             rects.insert(id, rect);
             let active = i == self.active;
-            let resp = ui.interact(rect, tid, Sense::click());
+            // Clickable right up to the top edge of the window (like the window buttons), so a
+            // maximised window's tabs work with the mouse slammed against the top of the screen.
+            let hit = Rect::from_min_max(pos2(rect.left(), strip.top()), rect.max);
+            let resp = ui.interact(hit, tid, Sense::click());
             let close_rect = Rect::from_min_size(pos2(rect.right() - 6.0 - 22.0, rect.center().y - 11.0), Vec2::splat(22.0));
             let narrow = aw < 66.0;
             // Geometric hover (egui stops reporting hover on other widgets while a button is held).
-            let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.contains(p));
+            let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| hit.contains(p));
             let show_close = active || (over && aw > 96.0) || (narrow && over);
             let close = ui.interact(close_rect, tid.with("x"), Sense::click());
             let hovered = over;
