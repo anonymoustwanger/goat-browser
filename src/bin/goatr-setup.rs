@@ -88,6 +88,64 @@ struct Shared {
     step: String,
     pct: f32,
     result: Option<Result<(), String>>,
+    /// "Turn it off for me": None idle, Some(None) waiting, Some(Some(r)) finished.
+    diag: Option<Option<Result<(), String>>>,
+}
+
+const DIAG_KEY: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection";
+
+/// Whether Windows' optional diagnostic data is already off (AllowTelemetry 0 or 1, in the
+/// place the Settings toggle writes, or a group policy).
+#[cfg(windows)]
+fn diag_already_off() -> bool {
+    let read = |key: &str| -> Option<u32> {
+        let out = std::process::Command::new("reg").args(["query", key, "/v", "AllowTelemetry"]).creation_flags_hidden().output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let v = text.lines().find(|l| l.contains("AllowTelemetry"))?.split("0x").nth(1)?.trim().to_string();
+        u32::from_str_radix(&v, 16).ok()
+    };
+    if let Some(v) = read(r"HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection") {
+        return v <= 1;
+    }
+    read(DIAG_KEY).is_some_and(|v| v <= 1)
+}
+#[cfg(not(windows))]
+fn diag_already_off() -> bool {
+    false
+}
+
+/// Switch off optional diagnostic data like the Settings toggle does (needs an admin prompt).
+#[cfg(windows)]
+fn diag_turn_off() -> Result<(), String> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    let params = HSTRING::from(format!("add \"{DIAG_KEY}\" /v AllowTelemetry /t REG_DWORD /d 1 /f"));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: w!("runas"),
+        lpFile: w!("reg.exe"),
+        lpParameters: windows::core::PCWSTR(params.as_ptr()),
+        nShow: 0,
+        ..Default::default()
+    };
+    unsafe {
+        ShellExecuteExW(&mut info).map_err(|_| "Windows didn't get admin permission, so the setting wasn't changed.".to_string())?;
+        if info.hProcess.is_invalid() {
+            return Err("Couldn't change the setting.".into());
+        }
+        WaitForSingleObject(info.hProcess, INFINITE);
+        let mut code = 1u32;
+        let _ = GetExitCodeProcess(info.hProcess, &mut code);
+        let _ = CloseHandle(info.hProcess);
+        if code == 0 { Ok(()) } else { Err("Couldn't change the setting.".into()) }
+    }
+}
+#[cfg(not(windows))]
+fn diag_turn_off() -> Result<(), String> {
+    Err("Only on Windows.".into())
 }
 
 /// Choices on the Advanced screen, saved into Goatr's settings when installing.
@@ -1028,7 +1086,12 @@ impl eframe::App for SetupApp {
                 } else {
                     let label = if self.existing.is_some() { "Update" } else { "Install" };
                     if self.button(ui, primary_r, label, 1, rel.is_some() && !self.dir.trim().is_empty()) {
-                        self.screen = Screen::Warning;
+                        if self.mode == Mode::Install && !diag_already_off() {
+                            self.shared.lock().unwrap().diag = None;
+                            self.screen = Screen::Warning;
+                        } else {
+                            self.start(&ctx);
+                        }
                     }
                 }
             }
@@ -1055,20 +1118,42 @@ impl eframe::App for SetupApp {
                 ui.painter().line_segment([c + vec2(0.0, -12.0), c + vec2(0.0, 4.0)], Stroke::new(3.2, amber));
                 ui.painter().circle_filled(c + vec2(0.0, 12.0), 2.0, amber);
                 ui.painter().text(pos2(c.x, c.y + 50.0), Align2::CENTER_TOP, "Heads up about Microsoft", bold(22.0), TEXT);
-                let msg = "Goatr runs on Microsoft's WebView2 engine. Goatr itself sends no analytics, but WebView2 sends diagnostic data to Microsoft unless you turn it off in Windows settings.\n\nIn Windows Settings > Privacy & security > Diagnostics & feedback, turn off \"Send optional diagnostic data\".";
+                let msg = "Goatr runs on Microsoft's WebView2 engine. Goatr itself sends no analytics, but WebView2 sends diagnostic data to Microsoft unless you turn it off in Windows settings.\n\nGoatr can switch off \"Send optional diagnostic data\" for you. Windows will ask for admin permission once.";
                 let galley = ui.painter().layout(msg.to_string(), font(13.0), MUTED, body.width() - 60.0);
                 let gpos = pos2(c.x - galley.size().x / 2.0, c.y + 86.0);
+                let below = gpos.y + galley.size().y + 14.0;
                 ui.painter().galley(gpos, galley, MUTED);
-                let open_r = Rect::from_min_size(pos2(primary_r.left() - 12.0 - 200.0, actions_y), vec2(200.0, 40.0));
-                if self.button(ui, open_r, "Open Windows settings", 0, true) {
+                let diag = self.shared.lock().unwrap().diag.clone();
+                let waiting = matches!(diag, Some(None));
+                match &diag {
+                    Some(Some(Ok(()))) => self.start(&ctx),
+                    Some(Some(Err(e))) => {
+                        ui.painter().text(pos2(c.x, below), Align2::CENTER_TOP, e, font(12.5), DANGER);
+                    }
+                    Some(None) => {
+                        ui.painter().text(pos2(c.x, below), Align2::CENTER_TOP, "Waiting for Windows…", font(12.5), MUTED);
+                    }
+                    None => {}
+                }
+                if self.link(ui, pos2(body.left(), actions_y - 22.0), "Open Windows settings instead") {
                     #[cfg(windows)]
                     let _ = std::process::Command::new("cmd").args(["/d", "/c", "start", "", "ms-settings:privacy-feedback"]).creation_flags_hidden().spawn();
                 }
-                if self.link(ui, pos2(body.left(), actions_y + 11.0), "‹  Back") {
+                if self.link(ui, pos2(body.left(), actions_y + 14.0), "‹  Back") && !waiting {
                     self.screen = Screen::Welcome;
                 }
-                if self.button(ui, primary_r, "Ignore and continue", 1, true) {
+                let ignore_r = Rect::from_min_size(pos2(primary_r.left() - 12.0 - 170.0, actions_y), vec2(170.0, 40.0));
+                if self.button(ui, ignore_r, "Ignore and continue", 0, !waiting) {
                     self.start(&ctx);
+                }
+                if self.button(ui, primary_r, "Turn it off for me", 1, !waiting) {
+                    self.shared.lock().unwrap().diag = Some(None);
+                    let (sh, c2) = (self.shared.clone(), ctx.clone());
+                    std::thread::spawn(move || {
+                        let r = diag_turn_off();
+                        sh.lock().unwrap().diag = Some(Some(r));
+                        c2.request_repaint();
+                    });
                 }
             }
             Screen::Confirm => {
