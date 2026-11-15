@@ -45,6 +45,8 @@ enum Mode {
 #[derive(Clone, PartialEq)]
 enum Screen {
     Welcome,
+    Advanced,
+    Warning,
     Confirm,
     Work,
     Done,
@@ -88,7 +90,81 @@ struct Shared {
     result: Option<Result<(), String>>,
 }
 
+/// Choices on the Advanced screen, saved into Goatr's settings when installing.
+#[derive(Clone)]
+struct Adv {
+    dns: String,
+    theme: String,
+    search: String,
+    adblock: String,
+}
+
+const DNS_CHOICES: &[(&str, &str)] = &[
+    ("off", "Off (use Windows DNS)"),
+    ("quad9", "Quad9"),
+    ("mullvad", "Mullvad"),
+    ("mullvadAdblock", "Mullvad, blocks ads"),
+    ("cloudflare", "Cloudflare"),
+    ("google", "Google"),
+    ("adguard", "AdGuard, blocks ads"),
+];
+const THEME_CHOICES: &[(&str, &str)] = &[
+    ("system", "Match Windows"),
+    ("midnight", "Midnight"),
+    ("daylight", "Daylight"),
+    ("forest", "Forest"),
+    ("ocean", "Ocean"),
+    ("sunset", "Sunset"),
+    ("grape", "Grape"),
+    ("mono", "Mono"),
+    ("paper", "Paper"),
+];
+const SEARCH_CHOICES: &[(&str, &str)] = &[
+    ("duckduckgo", "DuckDuckGo"),
+    ("brave", "Brave Search"),
+    ("startpage", "Startpage"),
+    ("google", "Google"),
+    ("bing", "Bing"),
+];
+const ADBLOCK_CHOICES: &[(&str, &str)] = &[("ads", "Ads only"), ("standard", "Ads and trackers"), ("strict", "Strict")];
+
+fn data_file() -> PathBuf {
+    data_dir().join("data").join("goatr-data.json")
+}
+
+impl Adv {
+    /// Your current settings when Goatr is already set up, else the installer's defaults (no DNS).
+    fn load() -> Self {
+        let j: serde_json::Value = std::fs::read_to_string(data_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let st = &j["settings"];
+        let get = |k: &str, d: &str| st[k].as_str().filter(|v| !v.is_empty()).unwrap_or(d).to_string();
+        Adv { dns: get("dns_provider", "off"), theme: get("theme", "system"), search: get("search_engine", "duckduckgo"), adblock: get("adblock_level", "standard") }
+    }
+
+    /// Merge into Goatr's data file, keeping everything else in it.
+    fn save(&self) -> Result<(), String> {
+        let path = data_file();
+        let mut j: serde_json::Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
+        if !j.is_object() {
+            j = serde_json::json!({});
+        }
+        if !j["settings"].is_object() {
+            j["settings"] = serde_json::json!({});
+        }
+        let st = &mut j["settings"];
+        st["dns_provider"] = self.dns.clone().into();
+        st["theme"] = self.theme.clone().into();
+        st["search_engine"] = self.search.clone().into();
+        st["adblock_level"] = self.adblock.clone().into();
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("Couldn't create {}: {e}", d.display()))?;
+        }
+        std::fs::write(&path, j.to_string()).map_err(|e| format!("Couldn't save your settings: {e}"))
+    }
+}
+
 struct SetupApp {
+    adv: Adv,
     mode: Mode,
     screen: Screen,
     dir: String,
@@ -127,6 +203,7 @@ fn main() -> eframe::Result<()> {
                 fetch_release(shared.clone(), cc.egui_ctx.clone());
             }
             Ok(Box::new(SetupApp {
+                adv: Adv::load(),
                 mode,
                 screen: if mode == Mode::Install { Screen::Welcome } else { Screen::Confirm },
                 dir: dir.display().to_string(),
@@ -290,7 +367,7 @@ const WEBVIEW2_LOADER: Option<&[u8]> = Some(include_bytes!("../../assets/WebView
 #[cfg(not(windows))]
 const WEBVIEW2_LOADER: Option<&[u8]> = None;
 
-fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, step: &dyn Fn(&str, f32)) -> Result<(), String> {
+fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: &Adv, step: &dyn Fn(&str, f32)) -> Result<(), String> {
     let exe_bytes = if rel.bundled {
         step("Unpacking Goatr…", 0.4);
         BUNDLED_EXE.to_vec()
@@ -332,6 +409,8 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, step: &
         }
     }
     let _ = std::fs::write(dir.join("THIRD-PARTY-NOTICES.txt"), include_str!("../../THIRD-PARTY-NOTICES.txt"));
+    step("Saving your choices…", 0.9);
+    adv.save()?;
     let marker = serde_json::json!({ "version": rel.version, "installed": chrono::Local::now().to_rfc3339() });
     let _ = std::fs::write(dir.join(MARKER), marker.to_string());
 
@@ -644,6 +723,7 @@ impl SetupApp {
         let dir = PathBuf::from(self.dir.trim());
         let (desktop, make_default, remove_data) = (self.desktop, self.make_default, self.remove_data);
         let rel = self.shared.lock().unwrap().release.clone().and_then(Result::ok);
+        let adv = self.adv.clone();
         std::thread::spawn(move || {
             let step = |t: &str, p: f32| {
                 let mut s = shared.lock().unwrap();
@@ -653,7 +733,7 @@ impl SetupApp {
             };
             let r = match mode {
                 Mode::Install => match rel {
-                    Some(rel) => install(&rel, &dir, desktop, make_default, &step),
+                    Some(rel) => install(&rel, &dir, desktop, make_default, &adv, &step),
                     None => Err("No release to install.".into()),
                 },
                 Mode::Uninstall => uninstall(&dir, remove_data, &step),
@@ -691,6 +771,58 @@ impl SetupApp {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         resp.clicked() && enabled
+    }
+
+    /// Text button (accent, underlined on hover).
+    fn link(&self, ui: &mut egui::Ui, at: Pos2, label: &str) -> bool {
+        let galley = ui.painter().layout_no_wrap(label.to_string(), bold(13.0), ACCENT);
+        let r = Rect::from_min_size(at, galley.size()).expand(4.0);
+        let resp = ui.interact(r, Id::new(("link", label)), Sense::click());
+        let col = if resp.hovered() { mix(ACCENT, TEXT, 0.35) } else { ACCENT };
+        ui.painter().text(at, Align2::LEFT_TOP, label, bold(13.0), col);
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let y = at.y + galley.size().y + 1.0;
+            ui.painter().line_segment([pos2(at.x, y), pos2(at.x + galley.size().x, y)], Stroke::new(1.0, col));
+        }
+        resp.clicked()
+    }
+
+    /// A row with a title, a hint and a dropdown on the right.
+    fn select(&self, ui: &mut egui::Ui, r: Rect, title: &str, sub: &str, choices: &[(&str, &str)], value: &mut String) {
+        let p = ui.painter();
+        p.text(pos2(r.left() + 14.0, r.top() + 12.0), Align2::LEFT_TOP, title, bold(13.5), TEXT);
+        p.text(pos2(r.left() + 14.0, r.top() + 32.0), Align2::LEFT_TOP, sub, font(12.0), MUTED);
+        let label = choices.iter().find(|c| c.0 == value.as_str()).map(|c| c.1).unwrap_or(choices[0].1);
+        let field = Rect::from_min_size(pos2(r.right() - 14.0 - 210.0, r.center().y - 16.0), vec2(210.0, 32.0));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+            let v = &mut ui.style_mut().visuals;
+            v.widgets.inactive.weak_bg_fill = BG3;
+            v.widgets.inactive.bg_fill = BG3;
+            v.widgets.inactive.bg_stroke = Stroke::new(1.0, LINE);
+            v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+            v.widgets.hovered.weak_bg_fill = mix(BG3, LINE, 0.6);
+            v.widgets.hovered.bg_fill = mix(BG3, LINE, 0.6);
+            v.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT.gamma_multiply(0.6));
+            v.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+            v.widgets.active = v.widgets.hovered;
+            v.widgets.open = v.widgets.hovered;
+            for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+                w.corner_radius = CornerRadius::same(8);
+            }
+            v.window_fill = BG2;
+            v.window_stroke = Stroke::new(1.0, LINE);
+            v.window_corner_radius = CornerRadius::same(10);
+            v.selection.bg_fill = ACCENT.gamma_multiply(0.25);
+            v.selection.stroke = Stroke::new(1.0, TEXT);
+            v.override_text_color = Some(TEXT);
+            ui.style_mut().spacing.button_padding = vec2(10.0, 7.0);
+            egui::ComboBox::from_id_salt(("sel", title)).selected_text(egui::RichText::new(label).font(font(13.0))).width(field.width()).show_ui(ui, |ui| {
+                for (id, name) in choices {
+                    ui.selectable_value(value, id.to_string(), egui::RichText::new(*name).font(font(13.0)));
+                }
+            });
+        });
     }
 
     fn checkbox(&self, ui: &mut egui::Ui, r: Rect, on: &mut bool, title: &str, sub: &str) {
@@ -883,6 +1015,9 @@ impl eframe::App for SetupApp {
                     font(12.0),
                     MUTED,
                 );
+                if self.link(ui, pos2(body.left(), actions_y + 11.0), "Advanced options  ›") {
+                    self.screen = Screen::Advanced;
+                }
                 if self.button(ui, ghost_r, "Cancel", 0, true) {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -893,8 +1028,47 @@ impl eframe::App for SetupApp {
                 } else {
                     let label = if self.existing.is_some() { "Update" } else { "Install" };
                     if self.button(ui, primary_r, label, 1, rel.is_some() && !self.dir.trim().is_empty()) {
-                        self.start(&ctx);
+                        self.screen = Screen::Warning;
                     }
+                }
+            }
+            Screen::Advanced => {
+                self.hero(ui, body.min, "Advanced options", "Pick how Goatr starts out. You can change all of this later in Settings.", MUTED);
+                let card = Rect::from_min_size(pos2(body.left(), body.top() + 84.0), vec2(body.width(), 4.0 * 58.0 + 12.0));
+                ui.painter().rect_filled(card, 14, BG2);
+                ui.painter().rect_stroke(card, 14, Stroke::new(1.0, LINE), StrokeKind::Inside);
+                let row = |i: f32| Rect::from_min_size(pos2(card.left() + 6.0, card.top() + 6.0 + i * 58.0), vec2(card.width() - 12.0, 58.0));
+                let mut adv = self.adv.clone();
+                self.select(ui, row(0.0), "Encrypted DNS", "Off uses your normal Windows DNS.", DNS_CHOICES, &mut adv.dns);
+                self.select(ui, row(1.0), "Theme", "Colours for Goatr and its pages.", THEME_CHOICES, &mut adv.theme);
+                self.select(ui, row(2.0), "Search engine", "Used when you type in the address bar.", SEARCH_CHOICES, &mut adv.search);
+                self.select(ui, row(3.0), "Ad blocker", "Strict can break a few sites.", ADBLOCK_CHOICES, &mut adv.adblock);
+                self.adv = adv;
+                if self.button(ui, primary_r, "Done", 1, true) {
+                    self.screen = Screen::Welcome;
+                }
+            }
+            Screen::Warning => {
+                let c = pos2(full.center().x, body.top() + 50.0);
+                ui.painter().circle_filled(c, 34.0, Color32::from_rgb(0xf0, 0xb3, 0x5a).gamma_multiply(0.16));
+                let amber = Color32::from_rgb(0xf0, 0xb3, 0x5a);
+                ui.painter().line_segment([c + vec2(0.0, -12.0), c + vec2(0.0, 4.0)], Stroke::new(3.2, amber));
+                ui.painter().circle_filled(c + vec2(0.0, 12.0), 2.0, amber);
+                ui.painter().text(pos2(c.x, c.y + 50.0), Align2::CENTER_TOP, "Heads up about Microsoft", bold(22.0), TEXT);
+                let msg = "Goatr runs on Microsoft's WebView2 engine. Goatr itself sends no analytics, but WebView2 sends diagnostic data to Microsoft unless you turn it off in Windows settings.\n\nIn Windows Settings > Privacy & security > Diagnostics & feedback, turn off \"Send optional diagnostic data\".";
+                let galley = ui.painter().layout(msg.to_string(), font(13.0), MUTED, body.width() - 60.0);
+                let gpos = pos2(c.x - galley.size().x / 2.0, c.y + 86.0);
+                ui.painter().galley(gpos, galley, MUTED);
+                let open_r = Rect::from_min_size(pos2(primary_r.left() - 12.0 - 200.0, actions_y), vec2(200.0, 40.0));
+                if self.button(ui, open_r, "Open Windows settings", 0, true) {
+                    #[cfg(windows)]
+                    let _ = std::process::Command::new("cmd").args(["/d", "/c", "start", "", "ms-settings:privacy-feedback"]).creation_flags_hidden().spawn();
+                }
+                if self.link(ui, pos2(body.left(), actions_y + 11.0), "‹  Back") {
+                    self.screen = Screen::Welcome;
+                }
+                if self.button(ui, primary_r, "Ignore and continue", 1, true) {
+                    self.start(&ctx);
                 }
             }
             Screen::Confirm => {
