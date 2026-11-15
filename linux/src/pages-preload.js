@@ -37,6 +37,7 @@ if (host === 'history') {
     open: (id, how) => ipcRenderer.invoke('goat:newtab-open', String(id), how),
     add: (url, title) => ipcRenderer.invoke('goat:newtab-add', String(url), String(title || '')),
     remove: (id) => ipcRenderer.invoke('goat:newtab-remove', String(id)),
+    edit: (id, url, title) => ipcRenderer.invoke('goat:newtab-edit', String(id), String(url), String(title || '')),
     onBookmarks: (fn) => ipcRenderer.on('goat:bookmarks', (_e, items) => fn(items)),
   });
 } else if (host === 'settings') {

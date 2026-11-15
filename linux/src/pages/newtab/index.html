@@ -18,14 +18,19 @@
     <section class="speed" id="speed" aria-label="Bookmarks">
       <div class="tiles" id="tiles"></div>
       <form class="addbox" id="addbox" hidden autocomplete="off">
-        <div class="folderhead"><b>Add bookmark</b><button type="button" id="addclose" aria-label="Cancel">×</button></div>
+        <div class="folderhead"><b id="addhead">Add bookmark</b><button type="button" id="addclose" aria-label="Cancel">×</button></div>
         <div class="addfields">
           <label>Name <input id="addtitle" maxlength="120" placeholder="Optional" spellcheck="false"></label>
           <label>Address <input id="addurl" placeholder="youtube.com" spellcheck="false" required></label>
-          <button type="submit" class="addgo">Add</button>
+          <button type="submit" class="addgo" id="addgo">Add</button>
         </div>
         <p class="adderr" id="adderr" role="alert" hidden></p>
       </form>
+      <div class="tmenu" id="tmenu" role="menu" hidden>
+        <button type="button" role="menuitem" data-a="edit">Edit name and link</button>
+        <button type="button" role="menuitem" data-a="newtab">Open in new tab</button>
+        <button type="button" role="menuitem" class="danger" data-a="delete">Delete</button>
+      </div>
       <div class="folderbox" id="folderbox" hidden>
         <div class="folderhead"><b id="foldername"></b><button id="folderclose" aria-label="Close folder">×</button></div>
         <div class="tiles small" id="foldertiles"></div>

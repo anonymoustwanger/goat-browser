@@ -1,6 +1,10 @@
 //! One Goat per profile: a link opened from another app while Goat is running becomes a tab in
 //! the open window instead of a new window. The running window listens on a named pipe; a new
 //! Goat started with an address hands it over and exits.
+//!
+//! The same pipe lets a no-hardware-acceleration window share cookies with the normal window
+//! (the two can't use one cookie store): it fetches the normal window's cookies when it opens,
+//! and sends its own back while it runs and when it closes.
 
 /// Pipe name for this Windows user and profile.
 fn pipe_name(profile: &str) -> String {
@@ -9,34 +13,66 @@ fn pipe_name(profile: &str) -> String {
     format!(r"\\.\pipe\Goat-{user}-{prof}")
 }
 
+/// What a client asked the running window for.
+pub enum Request {
+    Open(String),
+    /// Send back all cookies (JSON list of CookieInfo) on the channel.
+    CookiesGet(std::sync::mpsc::Sender<String>),
+    CookiesPut(Vec<crate::shared::CookieInfo>),
+}
+
+#[cfg(windows)]
+fn connect(profile: &str) -> Option<std::fs::File> {
+    let name = pipe_name(profile);
+    for _ in 0..10 {
+        match std::fs::OpenOptions::new().read(true).write(true).open(&name) {
+            Ok(f) => return Some(f),
+            // All pipe instances busy for a moment: try again.
+            Err(e) if e.raw_os_error() == Some(231) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// The normal window's cookies (None when it isn't running).
+#[cfg(windows)]
+pub fn cookies_get(profile: &str) -> Option<Vec<crate::shared::CookieInfo>> {
+    use std::io::{Read, Write};
+    let mut f = connect(profile)?;
+    f.write_all(b"cookies-get\n").ok()?;
+    let mut out = Vec::new();
+    f.read_to_end(&mut out).ok()?;
+    serde_json::from_slice(&out).ok()
+}
+
+/// Give the normal window this window's cookies.
+#[cfg(windows)]
+pub fn cookies_put(profile: &str, list: &[crate::shared::CookieInfo]) -> bool {
+    use std::io::Write;
+    let Some(mut f) = connect(profile) else { return false };
+    let body = serde_json::to_vec(list).unwrap_or_default();
+    f.write_all(b"cookies-put\n").is_ok() && f.write_all(&body).is_ok()
+}
+
 /// Give `url` to a Goat already running this profile. True if one took it.
 #[cfg(windows)]
 pub fn forward(profile: &str, url: &str) -> bool {
     use std::io::Write;
-    let name = pipe_name(profile);
-    for _ in 0..10 {
-        match std::fs::OpenOptions::new().write(true).open(&name) {
-            Ok(mut f) => {
-                // Let the running window come to the front.
-                unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
-                }
-                return f.write_all(format!("open\n{url}").as_bytes()).is_ok();
-            }
-            // All pipe instances busy for a moment: try again.
-            Err(e) if e.raw_os_error() == Some(231) => std::thread::sleep(std::time::Duration::from_millis(100)),
-            Err(_) => return false,
-        }
+    let Some(mut f) = connect(profile) else { return false };
+    // Let the running window come to the front.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(windows::Win32::UI::WindowsAndMessaging::ASFW_ANY);
     }
-    false
+    f.write_all(format!("open\n{url}").as_bytes()).is_ok()
 }
 
 /// Listen for addresses from new Goat processes (on a background thread).
 #[cfg(windows)]
-pub fn listen(profile: &str, on_url: impl Fn(String) + Send + 'static) {
+pub fn listen(profile: &str, on_req: impl Fn(Request) + Send + 'static) {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows::Win32::Storage::FileSystem::{ReadFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_INBOUND};
+    use windows::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
     use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT};
     let name = HSTRING::from(pipe_name(profile));
     std::thread::Builder::new()
@@ -45,11 +81,11 @@ pub fn listen(profile: &str, on_url: impl Fn(String) + Send + 'static) {
             let pipe = unsafe {
                 CreateNamedPipeW(
                     &name,
-                    PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                     1,
-                    0,
-                    64 * 1024,
+                    1 << 20,
+                    1 << 20,
                     0,
                     None,
                 )
@@ -62,21 +98,41 @@ pub fn listen(profile: &str, on_url: impl Fn(String) + Send + 'static) {
             let connected = unsafe { ConnectNamedPipe(pipe, None) }.is_ok() || std::io::Error::last_os_error().raw_os_error() == Some(535);
             if connected {
                 let mut data = Vec::new();
-                let mut buf = [0u8; 8192];
+                let mut buf = [0u8; 64 * 1024];
+                let mut answered = false;
                 loop {
                     let mut n = 0u32;
                     if unsafe { ReadFile(pipe, Some(&mut buf), Some(&mut n), None) }.is_err() || n == 0 {
                         break;
                     }
                     data.extend_from_slice(&buf[..n as usize]);
-                    if data.len() > 64 * 1024 {
+                    // "cookies-get" waits for an answer, so it can't wait for the client to finish.
+                    if data.starts_with(b"cookies-get\n") {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        on_req(Request::CookiesGet(tx));
+                        let json = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| "[]".into());
+                        let mut written = 0u32;
+                        unsafe {
+                            let _ = WriteFile(pipe, Some(json.as_bytes()), Some(&mut written), None);
+                            let _ = FlushFileBuffers(pipe);
+                        }
+                        answered = true;
+                        break;
+                    }
+                    if data.len() > 32 << 20 {
                         break;
                     }
                 }
-                let text = String::from_utf8_lossy(&data).into_owned();
-                if let Some(url) = text.strip_prefix("open\n") {
-                    if !url.trim().is_empty() {
-                        on_url(url.trim().to_string());
+                if !answered {
+                    if let Some(url) = data.strip_prefix(b"open\n") {
+                        let url = String::from_utf8_lossy(url).trim().to_string();
+                        if !url.is_empty() {
+                            on_req(Request::Open(url));
+                        }
+                    } else if let Some(body) = data.strip_prefix(b"cookies-put\n") {
+                        if let Ok(list) = serde_json::from_slice(body) {
+                            on_req(Request::CookiesPut(list));
+                        }
                     }
                 }
                 unsafe {

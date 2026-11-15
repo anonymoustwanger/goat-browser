@@ -587,13 +587,13 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
     let mut tiles = String::new();
     for b in s.data.bookmarks.iter().take(24) {
         tiles.push_str(&format!(
-            "<div class=\"tilewrap\"><a class=\"tile\" href=\"{}\" title=\"{}\"><span class=\"ticon\">{}</span><span class=\"tlabel\">{}</span></a>\
-             <button class=\"tremove\" title=\"Remove\" aria-label=\"Remove\" onclick=\"api('bookmark/delete',{{id:{}}}).then(()=>this.parentNode.remove())\">×</button></div>",
+            "<div class=\"tilewrap\"><a class=\"tile\" href=\"{}\" title=\"{} (right-click to edit)\" data-id=\"{}\" data-title=\"{}\"><span class=\"ticon\">{}</span><span class=\"tlabel\">{}</span></a></div>",
             esc(&b.url),
             esc(&b.url),
+            b.id,
+            esc(&b.title),
             esc(&name_letter(&b.title, &b.url)),
             esc(&b.title),
-            b.id
         ));
     }
     let lvl = match s.data.settings.adblock_level.as_str() { "ads" => "Ads only", "strict" => "Strict", _ => "Standard" };
@@ -602,14 +602,19 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
 <section class="speed" aria-label="Bookmarks">
   <div class="tiles" id="tiles">TILES<button class="tile add" type="button" onclick="$('addbox').hidden=false;$('addurl').focus()"><span class="ticon">+</span><span class="tlabel">Add</span></button></div>
   <form class="addbox" id="addbox" hidden autocomplete="off">
-    <div class="folderhead"><b>Add bookmark</b><button type="button" onclick="$('addbox').hidden=true" aria-label="Cancel">×</button></div>
+    <div class="folderhead"><b id="addhead">Add bookmark</b><button type="button" onclick="closeBox()" aria-label="Cancel">×</button></div>
     <div class="addfields">
       <label>Name <input id="addtitle" maxlength="120" placeholder="Optional" spellcheck="false"></label>
       <label>Address <input id="addurl" placeholder="youtube.com" spellcheck="false" required></label>
-      <button type="submit" class="addgo">Add</button>
+      <button type="submit" class="addgo" id="addgo">Add</button>
     </div>
   </form>
 </section>
+<div class="tmenu" id="tmenu" role="menu" hidden>
+  <button type="button" role="menuitem" data-a="edit">Edit name and link</button>
+  <button type="button" role="menuitem" data-a="newtab">Open in new tab</button>
+  <button type="button" role="menuitem" class="danger" data-a="delete">Delete</button>
+</div>
 <ul class="facts" FACTSHIDE>
   <li><b>Ads & trackers blocked.</b> Shield level: LEVEL. Click the shield to change it or pause it on a site.</li>
   <li><b>Private and Tor tabs.</b> Ctrl+Shift+N for a private tab, Alt+Shift+N for a Tor tab.</li>
@@ -618,12 +623,54 @@ fn newtab(s: &Store, look: &Look, private: bool) -> Resp {
 </ul>
 </main>
 <script>
+let editing = null; // bookmark id being edited, or null when adding
+function closeBox() { $('addbox').hidden = true; editing = null; $('addhead').textContent = 'Add bookmark'; $('addgo').textContent = 'Add'; }
 $('addbox').addEventListener('submit', async (e) => {
   e.preventDefault();
   let u = $('addurl').value.trim(); if (!u) return;
   if (!/^[a-z]+:/i.test(u)) u = 'https://' + u;
   let t = $('addtitle').value.trim(); if (!t) { try { t = new URL(u).hostname.replace(/^www\./, ''); } catch (_) { t = u; } }
-  if (await api('bookmark/add', {title: t, url: u})) location.reload();
+  const ok = editing == null ? await api('bookmark/add', {title: t, url: u}) : await api('bookmark/edit', {id: editing, title: t, url: u});
+  if (ok) location.reload();
+});
+// Right-click a bookmark: edit its name and link, open it in a new tab, or delete it.
+let menuTile = null;
+const menu = $('tmenu');
+document.body.append(menu); // fixed position must not be inside an animated (transformed) box
+const hideMenu = () => { menu.hidden = true; menuTile = null; };
+document.addEventListener('contextmenu', (e) => {
+  const tile = e.target.closest && e.target.closest('.tile[data-id]');
+  if (!tile) { hideMenu(); return; }
+  e.preventDefault();
+  menuTile = tile;
+  menu.hidden = false;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px';
+  menu.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+  menu.querySelector('button').focus({preventScroll: true});
+});
+addEventListener('pointerdown', (e) => { if (!menu.hidden && !menu.contains(e.target)) hideMenu(); }, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideMenu(); if (!$('addbox').hidden) closeBox(); } });
+addEventListener('scroll', hideMenu, {passive: true});
+addEventListener('blur', hideMenu);
+menu.addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b || !menuTile) return;
+  const tile = menuTile; hideMenu();
+  const id = Number(tile.dataset.id);
+  if (b.dataset.a === 'edit') {
+    editing = id;
+    $('addhead').textContent = 'Edit bookmark'; $('addgo').textContent = 'Save';
+    $('addtitle').value = tile.dataset.title || ''; $('addurl').value = tile.getAttribute('href');
+    $('addbox').hidden = false; $('addtitle').focus(); $('addtitle').select();
+  } else if (b.dataset.a === 'newtab') {
+    window.open(tile.getAttribute('href'), '_blank');
+  } else if (b.dataset.a === 'delete') {
+    if (await api('bookmark/delete', {id})) {
+      const wrap = tile.parentNode;
+      wrap.style.transition = 'opacity .18s ease, transform .18s ease'; wrap.style.opacity = '0'; wrap.style.transform = 'scale(.85)';
+      setTimeout(() => wrap.remove(), 180);
+    }
+  }
 });
 </script>"#
         .replace("INTERNAL", INTERNAL_BASE)

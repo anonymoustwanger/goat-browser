@@ -2952,6 +2952,19 @@ function wirePagesIpc() {
     return addBookmark(url, title) ? { ok: true } : { error: "That address can't be bookmarked" };
   }));
   ipcMain.handle('goat:newtab-remove', fromPage('newtab', (id) => { removeBookmark(String(id)); return true; }));
+  // Right-click → Edit name and link.
+  ipcMain.handle('goat:newtab-edit', fromPage('newtab', (id, rawUrl, rawTitle) => {
+    const hit = findBookmark(String(id));
+    if (!hit || hit.b.type !== 'link') return { error: 'That bookmark is gone' };
+    const text = String(rawUrl || '').trim();
+    const url = toUrl(text);
+    if (!url || url === searchUrl(text) || !/^(https?|goat):/i.test(url)) return { error: 'Enter a web address, like youtube.com' };
+    hit.b.url = url;
+    const title = String(rawTitle || '').trim();
+    if (title) hit.b.title = title.slice(0, 120);
+    saveBookmarks();
+    return { ok: true };
+  }));
   ipcMain.handle('goat:newtab-open', fromPage('newtab', (id, how) => {
     const hit = findBookmark(String(id));
     if (hit && hit.b.type === 'link') openBookmarkUrl(hit.b.url, how === 'background' ? 'background' : 'current');

@@ -33,6 +33,10 @@ pub enum Notice {
     CheckUpdate,
     /// Another app opened a link while Goat was running: a tab here, and come to the front.
     External(String),
+    /// The no-GPU window wants this window's cookies (answer: JSON list).
+    CookiesGet(std::sync::mpsc::Sender<String>),
+    /// Cookies from the other window to add here.
+    CookiesPut(Vec<CookieInfo>),
     /// An update check finished (true = you asked for it).
     UpdateChecked(Result<crate::updater::Found, String>, bool),
 }

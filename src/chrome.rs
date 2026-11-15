@@ -751,7 +751,9 @@ impl App {
         // The find bar glides in, and the address bar narrows smoothly to make room.
         let find_t = anim::tween(&ctx, Id::new("find-open"), if self.find_open { 1.0 } else { 0.0 }, 0.34, anim::spring);
         let findr = Rect::from_min_size(pos2(rx - find_w, cy - 16.0), vec2(find_w, 32.0));
-        rx -= (find_w + 6.0) * find_t;
+        // The spring overshoots below 0 when closing; never let the address bar grow past its
+        // own space (it would slide over pinned extension buttons).
+        rx -= (find_w + 6.0) * find_t.max(0.0);
 
         // Address bar fills the middle.
         let addr = Rect::from_min_max(pos2(x + 6.0, cy - 16.0), pos2(rx - 6.0, cy + 16.0));

@@ -344,6 +344,10 @@ pub struct App {
     last_update_check: f64,
     update_checking: bool,
     update_started: bool,
+    /// No-GPU window: when it last sent its cookies to the normal window, and the send that
+    /// runs while it closes (started at, finished).
+    last_cookie_share: f64,
+    closing_share: Option<(f64, Arc<std::sync::atomic::AtomicBool>)>,
     /// Page sound played from Goat.exe for Discord (experimental).
     #[cfg(windows)]
     relay: Option<audiorelay::Relay>,
@@ -569,6 +573,8 @@ fn main() -> eframe::Result<()> {
                 last_update_check: f64::NEG_INFINITY,
                 update_checking: false,
                 update_started: false,
+                last_cookie_share: 0.0,
+                closing_share: None,
                 profile_badge: None,
                 choosing_profile: false,
                 frame_stats: (std::time::Instant::now(), 0, 0.0, 0.0),
@@ -628,7 +634,23 @@ fn main() -> eframe::Result<()> {
             #[cfg(windows)]
             if window_kind == TabKind::Normal && store::launch().window.is_empty() {
                 let sh = app.sh.clone();
-                instance::listen(&store::launch().profile, move |url| (sh.notify)(shared::Notice::External(url)));
+                instance::listen(&store::launch().profile, move |req| {
+                    (sh.notify)(match req {
+                        instance::Request::Open(url) => shared::Notice::External(url),
+                        instance::Request::CookiesGet(tx) => shared::Notice::CookiesGet(tx),
+                        instance::Request::CookiesPut(list) => shared::Notice::CookiesPut(list),
+                    })
+                });
+            }
+            // No-GPU window: start with the normal window's cookies (logins carry over).
+            #[cfg(windows)]
+            if store::no_gpu_window() {
+                let sh = app.sh.clone();
+                std::thread::spawn(move || {
+                    if let Some(list) = instance::cookies_get(&store::launch().profile) {
+                        (sh.notify)(shared::Notice::CookiesPut(list));
+                    }
+                });
             }
             app.start_url = Some(match (start, window_kind) {
                 (Some(a), _) => resolve_input(&app.settings(), &a),
@@ -1554,6 +1576,31 @@ impl App {
                 Notice::OpenTorTab => cmds.push(Cmd::NewTorTab),
                 Notice::OpenProfile(name) => cmds.push(Cmd::OpenProfile(name)),
                 Notice::CheckUpdate => self.check_update(true),
+                Notice::CookiesGet(tx) => {
+                    #[cfg(windows)]
+                    match self.tabs.iter().find(|t| t.kind == TabKind::Normal) {
+                        Some(t) => winhooks::cookie_op(&t.webview, shared::CookieOp::List, move |r| {
+                            let _ = tx.send(r.map(|v| v.to_string()).unwrap_or_else(|_| "[]".into()));
+                        }),
+                        None => {
+                            let _ = tx.send("[]".into());
+                        }
+                    }
+                    #[cfg(not(windows))]
+                    let _ = tx.send("[]".into());
+                }
+                Notice::CookiesPut(list) => {
+                    #[cfg(windows)]
+                    if let Some(t) = self.tabs.iter().find(|t| t.kind == TabKind::Normal) {
+                        let n = list.len();
+                        for c in list {
+                            winhooks::cookie_op(&t.webview, shared::CookieOp::Set { cookie: c, original: None }, |_| {});
+                        }
+                        crashlog::debug(format!("cookies shared from the other window: {n}"));
+                    }
+                    #[cfg(not(windows))]
+                    let _ = list;
+                }
                 Notice::External(raw) => {
                     let url = resolve_input(&self.settings(), &raw);
                     if let Err(e) = self.open_tab(frame, &url, TabKind::Normal) {
@@ -2316,10 +2363,39 @@ impl App {
         });
     }
 
+    /// No-GPU window: send this window's cookies to the normal window (logins made here carry
+    /// over). `done` is set when it's finished.
+    fn share_cookies_back(&mut self, done: Option<Arc<std::sync::atomic::AtomicBool>>) {
+        self.last_cookie_share = now(&self.ctx);
+        #[cfg(windows)]
+        if let Some(t) = self.tabs.iter().find(|t| t.kind == TabKind::Normal) {
+            let ctx = self.ctx.clone();
+            winhooks::cookie_op(&t.webview, shared::CookieOp::List, move |r| {
+                let list: Vec<shared::CookieInfo> = r.ok().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+                std::thread::spawn(move || {
+                    if !list.is_empty() {
+                        instance::cookies_put(&store::launch().profile, &list);
+                    }
+                    if let Some(d) = done {
+                        d.store(true, Ordering::SeqCst);
+                    }
+                    ctx.request_repaint();
+                });
+            });
+            return;
+        }
+        if let Some(d) = done {
+            d.store(true, Ordering::SeqCst);
+        }
+    }
+
     fn housekeeping(&mut self, ctx: &egui::Context) {
         let t = now(ctx);
         if t - self.last_housekeeping < 5.0 {
             return;
+        }
+        if store::no_gpu_window() && t - self.last_cookie_share > 30.0 {
+            self.share_cookies_back(None);
         }
         // Automatic updates: 30 s after starting, then every 6 hours (normal windows only).
         if self.window_kind == TabKind::Normal && self.settings().auto_update && self.update.is_none() {
@@ -2589,6 +2665,22 @@ impl eframe::App for App {
             if now(&self.ctx) > due {
                 self.sh.store.lock().unwrap().save();
                 self.save_due = None;
+            }
+        }
+        // No-GPU window closing: hand its cookies to the normal window first (a moment at most).
+        if store::no_gpu_window() {
+            if ui.ctx().input(|i| i.viewport().close_requested()) && self.closing_share.is_none() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                self.closing_share = Some((now(ui.ctx()), flag.clone()));
+                self.share_cookies_back(Some(flag));
+            }
+            if let Some((t0, flag)) = &self.closing_share {
+                if (flag.load(Ordering::SeqCst) || now(ui.ctx()) - t0 > 3.0) && !ui.ctx().input(|i| i.viewport().close_requested()) {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                } else {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                }
             }
         }
         if ui.ctx().input(|i| i.viewport().close_requested()) {
