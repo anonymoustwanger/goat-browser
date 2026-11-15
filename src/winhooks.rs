@@ -543,3 +543,159 @@ pub fn watch_load_errors(webview: &wry::WebView) {
         let _ = wv.add_NavigationCompleted(&h, &mut token);
     }
 }
+
+/// Settings' cookie editor: list, save or delete cookies in this webview's profile.
+/// `done` runs on the UI thread with the answer (a list for `List`, else `{"ok":true}`).
+pub fn cookie_op(webview: &wry::WebView, op: crate::shared::CookieOp, done: impl FnOnce(Result<serde_json::Value, String>) + 'static) {
+    use crate::shared::{CookieInfo, CookieOp};
+    let mgr = unsafe { webview.webview().cast::<ICoreWebView2_2>().and_then(|w| w.CookieManager()) };
+    let Ok(mgr) = mgr else {
+        done(Err("The cookie store isn't available.".into()));
+        return;
+    };
+    let read = |c: &ICoreWebView2Cookie| unsafe {
+        let s = |f: &dyn Fn(*mut PWSTR) -> windows::core::Result<()>| {
+            let mut p = PWSTR::null();
+            if f(&mut p).is_ok() { take_pwstr(p) } else { String::new() }
+        };
+        let b = |f: &dyn Fn(*mut windows::core::BOOL) -> windows::core::Result<()>| {
+            let mut v = windows::core::BOOL::default();
+            f(&mut v).is_ok() && v.as_bool()
+        };
+        let mut expires = 0f64;
+        let _ = c.Expires(&mut expires);
+        let mut ss = COREWEBVIEW2_COOKIE_SAME_SITE_KIND::default();
+        let _ = c.SameSite(&mut ss);
+        CookieInfo {
+            name: s(&|p| c.Name(p)),
+            value: s(&|p| c.Value(p)),
+            domain: s(&|p| c.Domain(p)),
+            path: s(&|p| c.Path(p)),
+            expires,
+            session: b(&|p| c.IsSession(p)),
+            secure: b(&|p| c.IsSecure(p)),
+            http_only: b(&|p| c.IsHttpOnly(p)),
+            same_site: match ss {
+                COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT => "strict",
+                COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE => "none",
+                _ => "lax",
+            }
+            .into(),
+        }
+    };
+    let handle = |m: &ICoreWebView2CookieManager, c: &CookieInfo| unsafe { m.CreateCookie(&HSTRING::from(c.name.as_str()), &HSTRING::from(c.value.as_str()), &HSTRING::from(c.domain.as_str()), &HSTRING::from(c.path.as_str())) };
+    let ok = || Ok(serde_json::json!({ "ok": true }));
+    match op {
+        CookieOp::List | CookieOp::DeleteSite { .. } => {
+            let site = match &op {
+                CookieOp::DeleteSite { domain } => Some(domain.trim_start_matches('.').to_lowercase()),
+                _ => None,
+            };
+            let m2 = mgr.clone();
+            let mut done = Some(done);
+            let h = webview2_com::GetCookiesCompletedHandler::create(Box::new(move |hr, list| {
+                let Some(done) = done.take() else { return Ok(()) };
+                let Some(list) = list.filter(|_| hr.is_ok()) else {
+                    done(Err("Couldn't read cookies.".into()));
+                    return Ok(());
+                };
+                let mut n = 0u32;
+                let _ = unsafe { list.Count(&mut n) };
+                let mut out = Vec::new();
+                for i in 0..n {
+                    let Ok(c) = (unsafe { list.GetValueAtIndex(i) }) else { continue };
+                    let info = read(&c);
+                    match &site {
+                        Some(d) => {
+                            if info.domain.trim_start_matches('.').eq_ignore_ascii_case(d) {
+                                let _ = unsafe { m2.DeleteCookie(&c) };
+                            }
+                        }
+                        None => out.push(info),
+                    }
+                }
+                done(if site.is_some() { Ok(serde_json::json!({ "ok": true })) } else { Ok(serde_json::to_value(out).unwrap_or_default()) });
+                Ok(())
+            }));
+            if unsafe { mgr.GetCookies(windows::core::PCWSTR::null(), &h) }.is_err() {
+                // `done` was moved into the handler; it reports nothing if the call itself failed.
+                crate::crashlog::debug("cookie editor: GetCookies failed");
+            }
+        }
+        CookieOp::Set { cookie, original } => {
+            let c = &cookie;
+            if c.name.trim().is_empty() || c.domain.trim().is_empty() {
+                done(Err("A cookie needs a name and a site.".into()));
+                return;
+            }
+            if let Some(o) = &original {
+                if o.name != c.name || o.domain != c.domain || o.path != c.path {
+                    if let Ok(old) = handle(&mgr, o) {
+                        let _ = unsafe { mgr.DeleteCookie(&old) };
+                    }
+                }
+            }
+            let path = if c.path.is_empty() { "/".to_string() } else { c.path.clone() };
+            let c = CookieInfo { path, ..c.clone() };
+            let r = unsafe {
+                handle(&mgr, &c).and_then(|ck| {
+                    if !c.session && c.expires > 0.0 {
+                        ck.SetExpires(c.expires)?;
+                    }
+                    ck.SetIsSecure(c.secure || c.same_site == "none")?;
+                    ck.SetIsHttpOnly(c.http_only)?;
+                    ck.SetSameSite(match c.same_site.as_str() {
+                        "strict" => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
+                        "none" => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
+                        _ => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
+                    })?;
+                    mgr.AddOrUpdateCookie(&ck)
+                })
+            };
+            done(r.map(|_| serde_json::json!({ "ok": true })).map_err(|e| format!("Couldn't save the cookie: {}", e.message())));
+        }
+        CookieOp::Delete { cookie } => {
+            let r = handle(&mgr, &cookie).and_then(|c| unsafe { mgr.DeleteCookie(&c) });
+            done(r.map(|_| serde_json::json!({ "ok": true })).map_err(|e| format!("Couldn't delete the cookie: {}", e.message())));
+        }
+        CookieOp::DeleteAll => {
+            let r = unsafe { mgr.DeleteAllCookies() };
+            done(r.map_err(|e| e.message().to_string()).and_then(|_| ok()));
+        }
+    }
+}
+
+/// Turn loaded extensions on or off by WebView2 id (the setting is kept in the profile too).
+pub fn set_extensions_enabled(webview: &wry::WebView, wanted: Vec<(String, bool)>) {
+    unsafe {
+        let Ok(c13) = webview.webview().cast::<ICoreWebView2_13>() else { return };
+        let Ok(profile) = c13.Profile() else { return };
+        let Ok(p7) = profile.cast::<ICoreWebView2Profile7>() else { return };
+        let handler = webview2_com::ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(move |_hr, list| {
+            let Some(list) = list else { return Ok(()) };
+            let mut n = 0u32;
+            let _ = list.Count(&mut n);
+            for i in 0..n {
+                let Ok(ext) = list.GetValueAtIndex(i) else { continue };
+                let mut id = PWSTR::null();
+                if ext.Id(&mut id).is_err() {
+                    continue;
+                }
+                let id = take_pwstr(id);
+                let Some((_, on)) = wanted.iter().find(|(w, _)| *w == id) else { continue };
+                let mut cur = windows::core::BOOL::default();
+                if ext.IsEnabled(&mut cur).is_ok() && cur.as_bool() == *on {
+                    continue;
+                }
+                let (on, id2) = (*on, id.clone());
+                let done = webview2_com::BrowserExtensionEnableCompletedHandler::create(Box::new(move |hr| {
+                    crate::crashlog::debug(format!("extension {id2} {}: {hr:?}", if on { "on" } else { "off" }));
+                    Ok(())
+                }));
+                let _ = ext.Enable(on, &done);
+            }
+            Ok(())
+        }));
+        let _ = p7.GetBrowserExtensions(&handler);
+    }
+}

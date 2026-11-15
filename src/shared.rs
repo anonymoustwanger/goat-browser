@@ -24,6 +24,39 @@ pub enum Notice {
     OpenTab(String, bool, bool),
     /// Open a window for a profile ("" = default).
     OpenProfile(String),
+    /// Settings' cookie editor: run this on the engine's cookie store; the answer goes into
+    /// `Shared::cookie_results` under the id.
+    Cookies(u64, CookieOp),
+    /// Turn an extension (folder name) on or off.
+    ExtensionEnabled(String, bool),
+}
+
+/// One cookie, as the cookie editor shows it.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct CookieInfo {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    /// Seconds since 1970; ignored for session cookies.
+    pub expires: f64,
+    pub session: bool,
+    pub secure: bool,
+    pub http_only: bool,
+    /// "lax" | "strict" | "none"
+    pub same_site: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum CookieOp {
+    List,
+    /// Save a cookie; `original` is the one being edited (removed first if its name, site or path changed).
+    Set { cookie: CookieInfo, original: Option<CookieInfo> },
+    Delete { cookie: CookieInfo },
+    DeleteSite { domain: String },
+    DeleteAll,
 }
 
 pub struct Shared {
@@ -38,6 +71,9 @@ pub struct Shared {
     pub net_privacy: std::sync::RwLock<NetPrivacy>,
     /// Sites extensions talk to (their own servers): never stripped of cookies or blocked.
     pub ext_sites: std::sync::RwLock<Vec<String>>,
+    /// Finished cookie-editor requests (id → answer), collected by the settings page.
+    pub cookie_results: Mutex<std::collections::HashMap<u64, serde_json::Value>>,
+    pub next_cookie_req: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

@@ -64,6 +64,10 @@ pub struct Settings {
     pub discord_audio: bool,
     /// Extensions (folder names) that also run in private windows.
     pub private_extensions: Vec<String>,
+    /// Extensions (folder names) you turned off.
+    pub disabled_extensions: Vec<String>,
+    /// When a site asks for an image and one is in the clipboard, offer to paste it.
+    pub paste_uploads: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -123,6 +127,8 @@ impl Default for Settings {
             site_zoom: Default::default(),
             discord_audio: false,
             private_extensions: Vec::new(),
+            disabled_extensions: Vec::new(),
+            paste_uploads: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),

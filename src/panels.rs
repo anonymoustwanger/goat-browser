@@ -1177,17 +1177,20 @@ impl App {
     // ------------------------------------------------------------------ Extensions panel
 
     fn extensions_height(&self) -> f32 {
-        let n = crate::extinstall::list().len().min(6);
+        let off = self.settings().disabled_extensions;
+        let list: Vec<_> = crate::extinstall::list().into_iter().filter(|e| !off.contains(&e.folder)).collect();
+        let n = list.len().min(6);
         let store_page = self.active_tab().is_some_and(|t| crate::extinstall::parse_store_url(&t.url).is_some());
         56.0 + if store_page { 52.0 } else { 0.0 } + if n == 0 { 54.0 } else { n as f32 * 44.0 + 8.0 } + 1.0 + 56.0
     }
 
     fn draw_extensions(&mut self, ui: &mut Ui, p: &Painter, card_r: Rect, pal: &Palette, cmds: &mut Vec<Cmd>) {
         let ctx = ui.ctx().clone();
-        let list = crate::extinstall::list();
         let x0 = card_r.left() + 16.0;
         let w = card_r.width() - 32.0;
         let mut y = card_r.top() + 18.0;
+        let off = self.settings().disabled_extensions;
+        let list: Vec<_> = crate::extinstall::list().into_iter().filter(|e| !off.contains(&e.folder)).collect();
         p.text(pos2(x0, y + 8.0), Align2::LEFT_CENTER, "Extensions", bold(15.0), pal.text);
         let sub = match list.len() {
             0 => "None installed".to_string(),

@@ -711,7 +711,8 @@ impl App {
         if !private_like {
             let pins = self.settings().pinned_extensions;
             if !pins.is_empty() {
-                for e in crate::extinstall::list().into_iter().filter(|e| e.valid && pins.contains(&e.folder)) {
+                let off = self.settings().disabled_extensions;
+                for e in crate::extinstall::list().into_iter().filter(|e| e.valid && pins.contains(&e.folder) && !off.contains(&e.folder)) {
                     pinned_btns.push((btn(rx - 32.0), e));
                     rx -= 34.0;
                 }

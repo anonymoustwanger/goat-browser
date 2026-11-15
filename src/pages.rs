@@ -208,6 +208,22 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
             notify(Notice::OpenTorTab);
             return ok();
         }
+        // Cookie editor: the engine answers later, so the page asks for the result by id.
+        "cookies/op" => {
+            let op: crate::shared::CookieOp = match serde_json::from_slice(body) {
+                Ok(op) => op,
+                Err(e) => return respond(400, "text/plain", e.to_string().into_bytes()),
+            };
+            let id = sh.next_cookie_req.fetch_add(1, Ordering::SeqCst) + 1;
+            notify(Notice::Cookies(id, op));
+            return json(serde_json::json!({ "id": id }));
+        }
+        "cookies/result" => {
+            return match sh.cookie_results.lock().unwrap().remove(&b.id) {
+                Some(v) => json(v),
+                None => json(serde_json::json!({ "pending": true })),
+            };
+        }
         "adblock/update" => {
             let me = sh.clone();
             sh.adblock.refresh(true, move |n| (me.notify)(Notice::AdblockUpdated(n)));
@@ -235,6 +251,22 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
                 Ok(()) => ok(),
                 Err(e) => respond(400, "text/plain", e.into_bytes()),
             }
+        }
+        // Turn an extension on or off (title = folder, url = "on"/"off").
+        "extensions/enable" => {
+            let on = b.url == "on";
+            {
+                let mut s = sh.store.lock().unwrap();
+                let list = &mut s.data.settings.disabled_extensions;
+                list.retain(|f| *f != b.title);
+                if !on {
+                    list.push(b.title.clone());
+                }
+                s.save();
+            }
+            notify(Notice::ExtensionEnabled(b.title.clone(), on));
+            notify(Notice::StoreChanged);
+            return ok();
         }
         // Allow or stop an extension in private windows (title = folder, url = "on"/"off").
         "extensions/private" => {
@@ -963,16 +995,22 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
     for e in extinstall::list() {
         let folder_js = esc(&serde_json::to_string(&e.folder).unwrap_or_default());
         let in_private = st.private_extensions.contains(&e.folder);
+        let enabled = !st.disabled_extensions.contains(&e.folder);
         exts.push_str(&format!(
-            "<div class=\"ext\" id=\"ext-{}\"><span class=\"exticon\">{}</span><span class=\"extinfo\"><b>{}</b><small>{}{}</small></span>\
+            "<div class=\"ext{}\" id=\"ext-{}\"><span class=\"exticon\">{}</span><span class=\"extinfo\"><b>{}</b><small>{}{}</small></span>\
+             <label class=\"extpriv\" title=\"Turn this extension on or off\"><span>On</span>\
+             <input type=\"checkbox\" class=\"toggle\" {} onchange=\"extenable({}, this.checked, this)\"></label>\
              <label class=\"extpriv\" title=\"Also run this extension in private windows\"><span>Allow in private</span>\
              <input type=\"checkbox\" class=\"toggle\" {} onchange=\"privext({}, this.checked)\"></label>\
              <button class=\"x\" title=\"Remove\" onclick=\"rmext({})\">{}</button></div>",
+            if enabled { "" } else { " off" },
             esc(&e.folder),
             esc(&e.name.chars().next().unwrap_or('?').to_uppercase().to_string()),
             esc(&e.name),
             if e.version.is_empty() { String::new() } else { format!("v{} · ", esc(&e.version)) },
             esc(if !e.valid { "Broken: no manifest.json" } else if e.description.is_empty() { &e.folder } else { &e.description }),
+            if enabled { "checked" } else { "" },
+            folder_js,
             if in_private { "checked" } else { "" },
             folder_js,
             folder_js,
@@ -1021,6 +1059,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         </div>
         <div class="grid"><label class="wide">Address <input id="homeurl" placeholder="https://example.com" spellcheck="false" value="HOMEURL"></label></div>
       </div>
+      <label class="row"><span><b>Paste images when uploading</b><small>When a site asks for an image and there's one in your clipboard, Goat offers to paste it instead of picking a file. Applies to pages opened from now on.</small></span>
+        TOGGLE_PASTE
+      </label>
       <label class="row"><span><b>HTTPS-only mode</b><small>Upgrades http:// to https://. To use http:// on a site anyway, type its http:// address in the address bar.</small></span>
         TOGGLE_HTTPS
       </label>
@@ -1200,6 +1241,31 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Delete cookies when Goat closes</b><small>Signs you out of sites on every exit.</small></span>
         TOGGLE_CLEAR
       </label>
+    </div>
+
+    <h3>Cookie editor</h3>
+    <div class="card">
+      <div class="toolbar">
+        <input id="cookiesearch" placeholder="Search sites or cookie names" spellcheck="false" aria-label="Search cookies">
+        <span class="muted" id="cookiecount">Loading…</span>
+        <button id="cookieadd">Add cookie</button>
+        <button id="cookiereload">Refresh</button>
+        <button class="danger" id="cookieclear">Delete all</button>
+      </div>
+      <form id="cookieform" class="cookieform" hidden>
+        <b id="cookieformtitle">Add cookie</b>
+        <div class="grid">
+          <label>Name<input id="cf-name" spellcheck="false" required></label>
+          <label>Site (domain)<input id="cf-domain" spellcheck="false" placeholder="example.com or .example.com" required></label>
+          <label>Path<input id="cf-path" spellcheck="false" placeholder="/"></label>
+          <label class="wide">Value<textarea id="cf-value" spellcheck="false" rows="3"></textarea></label>
+          <label>Expires<input id="cf-expires" type="datetime-local"></label>
+          <label>Same-site<select id="cf-samesite"><option value="lax">Lax</option><option value="strict">Strict</option><option value="none">None</option></select></label>
+          <label class="checks"><span><input type="checkbox" id="cf-session"> Session (deleted when Goat closes)</span><span><input type="checkbox" id="cf-secure"> Secure (HTTPS only)</span><span><input type="checkbox" id="cf-httponly"> HttpOnly (hidden from page scripts)</span></label>
+        </div>
+        <div class="actions"><button type="submit" class="primary">Save cookie</button><button type="button" id="cf-cancel">Cancel</button><span class="muted" id="cf-msg"></span></div>
+      </form>
+      <div id="cookielist" class="cookielist"></div>
     </div>
   </section>
 
@@ -1414,6 +1480,11 @@ $('storeform').addEventListener('submit', async (e) => {
 });
 // edge://extensions/?id=… for an extension that isn't installed here: show the list.
 if (location.hash.startsWith('#ext-') && !document.getElementById(location.hash.slice(1))) location.hash = '#extensions';
+async function extenable(folder, on, box) {
+  await api('extensions/enable', {title: folder, url: on ? 'on' : 'off'});
+  box.closest('.ext').classList.toggle('off', !on);
+  $('extmsg').textContent = on ? 'Turned on.' : 'Turned off. It stays installed; switch it back on any time.';
+}
 async function privext(folder, on) {
   await api('extensions/private', {title: folder, url: on ? 'on' : 'off'});
   $('extmsg').textContent = on ? 'Runs in private windows opened from now on.' : 'Off in private windows opened from now on.';
@@ -1424,6 +1495,137 @@ async function rmext(folder) {
   $('extmsg').textContent = 'Removed. Restart Goat to finish.'; $('restart').hidden = false;
   setTimeout(() => location.reload(), 900);
 }
+// ---- cookie editor (the engine answers later: ask, then collect the answer by id)
+async function cookieApi(body) {
+  const r = await fetch('INTERNAL/api/cookies/op', {method: 'POST', headers: {'X-Goatr': '1', 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (!r.ok) throw new Error(await r.text());
+  const {id} = await r.json();
+  for (let i = 0; i < 150; i++) {
+    await new Promise((res) => setTimeout(res, i < 10 ? 30 : 100));
+    const a = await (await fetch('INTERNAL/api/cookies/result', {method: 'POST', headers: {'X-Goatr': '1', 'Content-Type': 'application/json'}, body: JSON.stringify({id})})).json();
+    if (a.pending) continue;
+    if (a.error) throw new Error(a.error);
+    return a;
+  }
+  throw new Error('The cookie store didn\'t answer.');
+}
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (k in n) n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null) n.append(c);
+  return n;
+}
+let cookies = [], cookieEditing = null;
+const openSites = new Set();
+const chost = (c) => c.domain.replace(/^\./, '');
+const fmtExpiry = (c) => c.session || !(c.expires > 0) ? 'Session' : new Date(c.expires * 1000).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
+async function loadCookies() {
+  try { cookies = await cookieApi({op: 'list'}); renderCookies(); }
+  catch (e) { $('cookiecount').textContent = ''; $('cookielist').textContent = ''; $('cookielist').append(el('p', {class: 'empty'}, "Couldn't load cookies: " + e.message)); }
+}
+function cookieRow(c) {
+  const value = el('input', {class: 'val', value: c.value, spellcheck: false, title: 'Edit the value, then press Enter'});
+  const save = async () => {
+    if (value.value === c.value) return;
+    try {
+      await cookieApi({op: 'set', cookie: {...c, value: value.value}, original: c});
+      c.value = value.value; value.classList.add('ok'); setTimeout(() => value.classList.remove('ok'), 900);
+    } catch (e) { alert(e.message); value.value = c.value; }
+  };
+  value.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); value.blur(); } });
+  value.addEventListener('change', save);
+  const flags = [c.secure && 'Secure', c.http_only && 'HttpOnly', 'SameSite=' + c.same_site[0].toUpperCase() + c.same_site.slice(1)].filter(Boolean).join(' · ');
+  return el('tr', {},
+    el('td', {class: 'name', title: c.name}, c.name),
+    el('td', {}, value),
+    el('td', {class: 'muted'}, fmtExpiry(c)),
+    el('td', {class: 'muted small'}, (c.path !== '/' ? c.path + ' · ' : '') + flags),
+    el('td', {class: 'rowbtns'},
+      el('button', {class: 'x', title: 'Edit everything', 'aria-label': 'Edit cookie ' + c.name, onclick: () => openCookieForm(c)}, '✎'),
+      el('button', {class: 'x', title: 'Delete cookie', 'aria-label': 'Delete cookie ' + c.name, onclick: async () => {
+        try { await cookieApi({op: 'delete', cookie: c}); cookies = cookies.filter((x) => x !== c); renderCookies(); } catch (e) { alert(e.message); }
+      }}, '×')),
+  );
+}
+function renderCookies() {
+  const q = $('cookiesearch').value.trim().toLowerCase();
+  const byHost = new Map();
+  for (const c of cookies) {
+    if (q && !chost(c).toLowerCase().includes(q) && !c.name.toLowerCase().includes(q)) continue;
+    if (!byHost.has(chost(c))) byHost.set(chost(c), []);
+    byHost.get(chost(c)).push(c);
+  }
+  const hosts = [...byHost.keys()].sort((a, b) => a.replace(/^www\./, '').localeCompare(b.replace(/^www\./, '')));
+  const sites = new Set(cookies.map(chost)).size;
+  $('cookiecount').textContent = `${cookies.length} cookie${cookies.length === 1 ? '' : 's'} · ${sites} site${sites === 1 ? '' : 's'}`;
+  const list = $('cookielist');
+  list.textContent = '';
+  if (!hosts.length) { list.append(el('p', {class: 'empty'}, q ? 'No matches.' : 'No cookies stored.')); return; }
+  for (const h of hosts) {
+    const items = byHost.get(h);
+    const isOpen = openSites.has(h) || (q && hosts.length <= 3);
+    list.append(el('div', {class: 'site' + (isOpen ? ' open' : '')},
+      el('button', {class: 'sitebtn', 'aria-expanded': String(!!isOpen), onclick: () => { openSites.has(h) ? openSites.delete(h) : openSites.add(h); renderCookies(); }},
+        el('span', {class: 'caret'}, '›'), el('span', {class: 'host'}, h), el('span', {class: 'muted'}, String(items.length))),
+      el('button', {class: 'linkdanger', onclick: async () => {
+        try { await cookieApi({op: 'delete_site', domain: h}); cookies = cookies.filter((c) => chost(c) !== h); renderCookies(); } catch (e) { alert(e.message); }
+      }}, 'Delete site')));
+    if (isOpen) {
+      list.append(el('div', {class: 'tablewrap'}, el('table', {},
+        el('thead', {}, el('tr', {}, el('th', {}, 'Name'), el('th', {}, 'Value'), el('th', {}, 'Expires'), el('th', {}, 'Details'), el('th', {}))),
+        el('tbody', {}, ...items.sort((a, b) => a.name.localeCompare(b.name)).map(cookieRow)))));
+    }
+  }
+}
+const pad = (n) => String(n).padStart(2, '0');
+const toLocalInput = (secs) => { const d = new Date(secs * 1000); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+function openCookieForm(c) {
+  cookieEditing = c || null;
+  $('cookieformtitle').textContent = c ? 'Edit cookie' : 'Add cookie';
+  $('cf-name').value = c ? c.name : '';
+  $('cf-domain').value = c ? c.domain : '';
+  $('cf-path').value = c ? c.path : '/';
+  $('cf-value').value = c ? c.value : '';
+  $('cf-session').checked = c ? c.session : false;
+  $('cf-expires').value = toLocalInput(c && c.expires > 0 ? c.expires : Date.now() / 1000 + 30 * 86400);
+  $('cf-expires').disabled = $('cf-session').checked;
+  $('cf-secure').checked = c ? c.secure : true;
+  $('cf-httponly').checked = c ? c.http_only : false;
+  $('cf-samesite').value = c ? c.same_site : 'lax';
+  $('cf-msg').textContent = '';
+  $('cookieform').hidden = false;
+  $('cf-name').focus();
+  $('cookieform').scrollIntoView({block: 'nearest', behavior: 'smooth'});
+}
+$('cf-session').onchange = () => { $('cf-expires').disabled = $('cf-session').checked; };
+$('cf-cancel').onclick = () => { $('cookieform').hidden = true; };
+$('cookieadd').onclick = () => openCookieForm(null);
+$('cookieform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const exp = $('cf-expires').value ? new Date($('cf-expires').value).getTime() / 1000 : 0;
+  const cookie = {name: $('cf-name').value.trim(), value: $('cf-value').value, domain: $('cf-domain').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, ''),
+    path: $('cf-path').value.trim() || '/', session: $('cf-session').checked, expires: $('cf-session').checked ? 0 : exp,
+    secure: $('cf-secure').checked, http_only: $('cf-httponly').checked, same_site: $('cf-samesite').value};
+  try {
+    await cookieApi({op: 'set', cookie, original: cookieEditing});
+    $('cookieform').hidden = true;
+    openSites.add(cookie.domain.replace(/^\./, ''));
+    await loadCookies();
+  } catch (err) { $('cf-msg').textContent = err.message; }
+});
+$('cookiesearch').addEventListener('input', renderCookies);
+$('cookiereload').onclick = loadCookies;
+$('cookieclear').onclick = async () => {
+  if (!confirm('Delete all cookies? You will be signed out of every site.')) return;
+  try { await cookieApi({op: 'delete_all'}); } catch (e) { alert(e.message); }
+  loadCookies();
+};
+loadCookies();
 // Highlight the section you're looking at in the side menu.
 const links = [...document.querySelectorAll('.side a')];
 const mark = () => {
@@ -1539,6 +1741,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_FONTS", &toggle("block_third_party_fonts", st.block_third_party_fonts))
         .replace("TOGGLE_3PC", &toggle("block_third_party_cookies", st.block_third_party_cookies).replace(">", " data-restartkey=\"cookies\">"))
         .replace("TOGGLE_CLEAR", &toggle("clear_cookies_on_exit", st.clear_cookies_on_exit))
+        .replace("TOGGLE_PASTE", &toggle("paste_uploads", st.paste_uploads))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

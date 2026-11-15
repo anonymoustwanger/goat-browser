@@ -219,3 +219,13 @@ em.restart { font-style: normal; color: var(--warn); font-weight: 600; }
 .progressbar { height: 6px; border-radius: 6px; background: var(--bg-3); overflow: hidden; margin: 0 0 12px; }
 .progressbar i { display: block; height: 100%; width: 0; background: var(--grad-accent); transition: width .25s ease; }
 #updstate.good { color: var(--accent); } #updstate.bad { color: var(--danger); }
+
+/* Cookie editor */
+.cookieform { border-top: 1px solid var(--line); padding: 14px 0 6px; animation: rise var(--dur-2) var(--ease-out) both; }
+.cookieform textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; min-height: 60px; }
+.cookieform .checks { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 18px; color: var(--text); }
+.cookieform .checks span { display: inline-flex; align-items: center; gap: 6px; }
+.cookieform .actions { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+td.rowbtns { white-space: nowrap; text-align: right; }
+td.rowbtns .x + .x { margin-left: 2px; }
+.ext.off .exticon, .ext.off .extinfo { opacity: .45; transition: opacity var(--dur-2) ease; }

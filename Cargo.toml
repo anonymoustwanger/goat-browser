@@ -21,6 +21,8 @@ raw-window-handle = "0.6"
 egui = "0.37"
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "x11", "wayland"] }
 png = "0.18"
+arboard = "3"
+base64 = "0.22"
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 
 [profile.release]

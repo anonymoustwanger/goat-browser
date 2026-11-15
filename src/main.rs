@@ -49,6 +49,7 @@ const YOUTUBE_JS: &str = include_str!("youtube.js");
 const INJECT_JS: &str = include_str!("inject.js");
 /// Per-tab volume (Goat's speaker button).
 const VOLUME_JS: &str = include_str!("volume.js");
+const PASTE_JS: &str = include_str!("paste.js");
 
 /// Where the built-in goatr:// pages live inside the webview.
 #[cfg(windows)]
@@ -85,6 +86,8 @@ pub enum Ev {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum ContentMsg {
     Key { action: String },
+    /// A site asked for a file: is there an image in the clipboard? (answered with __goatrClip)
+    ClipImage { id: u64 },
     JsError { msg: String },
     /// A web store's install button was clicked on this page.
     InstallExt { url: String },
@@ -495,6 +498,8 @@ fn main() -> eframe::Result<()> {
                     allow_http: Default::default(),
                     net_privacy: std::sync::RwLock::new(shared::NetPrivacy::from(&settings_now)),
                     ext_sites: std::sync::RwLock::new(extinstall::extension_sites()),
+                    cookie_results: Default::default(),
+                    next_cookie_req: Default::default(),
                 })
             };
             {
@@ -901,6 +906,7 @@ impl App {
             .with_initialization_script(INJECT_JS)
             .with_initialization_script(&privacy::page_script(&settings))
             .with_initialization_script(VOLUME_JS)
+            .with_initialization_script(if settings.paste_uploads { PASTE_JS } else { "" })
             .with_initialization_script(if settings.adblock { YOUTUBE_JS } else { "" })
             .with_ipc_handler(move |req: Request<String>| {
                 let _g = crashlog::Scope::new("page message");
@@ -1014,7 +1020,7 @@ impl App {
             if kind == TabKind::Private {
                 static PRIVATE_EXTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
                 if !PRIVATE_EXTS.swap(true, Ordering::SeqCst) {
-                    for folder in settings.private_extensions.clone() {
+                    for folder in settings.private_extensions.iter().filter(|f| !settings.disabled_extensions.contains(f)).cloned().collect::<Vec<_>>() {
                         let dir = extinstall::ext_dir().join(&folder);
                         if dir.is_dir() {
                             winhooks::add_extension(&webview, &dir, move |r| crashlog::debug(format!("private window extension {folder}: {r:?}")));
@@ -1335,7 +1341,11 @@ impl App {
                     crashlog::debug(format!("extensions loaded by WebView2: {names:?}"));
                 }
                 self.ext_ids = list.into_iter().collect();
+                let first = !self.ext_ids_known;
                 self.ext_ids_known = true;
+                if first {
+                    self.apply_extension_states();
+                }
                 if let Some((folder, anchor)) = self.ext_retry.take() {
                     cmds.push(Cmd::ExtOpen(folder, anchor));
                 }
@@ -1427,6 +1437,15 @@ impl App {
                 let is_active = self.active_tab().map(|t| t.id) == Some(id);
                 match m {
                     ContentMsg::Favicon { .. } => {}
+                    ContentMsg::ClipImage { id: req } => {
+                        let js = match clipboard_image() {
+                            Some((b64, mime, w, h)) => format!("window.__goatrClip&&window.__goatrClip({req},\"{b64}\",\"{mime}\",{w},{h})"),
+                            None => format!("window.__goatrClip&&window.__goatrClip({req},null)"),
+                        };
+                        if let Some(i) = self.tab_index(id) {
+                            let _ = self.tabs[i].webview.evaluate_script(&js);
+                        }
+                    }
                     ContentMsg::Cosmetic { url, classes, ids, first } => self.cosmetic(id, &url, classes, ids, first),
                     ContentMsg::JsError { msg } => crashlog::debug(format!("page script error (tab {id}): {msg:.400}")),
                     ContentMsg::InstallExt { url } => cmds.push(Cmd::InstallExtensionFrom(url)),
@@ -1499,6 +1518,33 @@ impl App {
                 }
                 Notice::OpenTorTab => cmds.push(Cmd::NewTorTab),
                 Notice::OpenProfile(name) => cmds.push(Cmd::OpenProfile(name)),
+                Notice::ExtensionEnabled(folder, on) => {
+                    if !self.ext_ids_known {
+                        self.toast("Applies once extensions have loaded");
+                    }
+                    self.apply_extension_states();
+                    if !on {
+                        self.toast("Extension turned off");
+                    }
+                    let _ = folder;
+                }
+                Notice::Cookies(id, op) => {
+                    let sh = self.sh.clone();
+                    let answer = move |r: Result<serde_json::Value, String>| {
+                        let v = r.unwrap_or_else(|e| serde_json::json!({ "error": e }));
+                        sh.cookie_results.lock().unwrap().insert(id, v);
+                    };
+                    #[cfg(windows)]
+                    match self.tabs.first() {
+                        Some(t) => winhooks::cookie_op(&t.webview, op, answer),
+                        None => answer(Err("Open a tab first.".into())),
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        let _ = op;
+                        answer(Err("The cookie editor needs Windows.".into()));
+                    }
+                }
                 Notice::OpenPrivateTab => cmds.push(Cmd::NewPrivateTab),
                 Notice::TorChanged => {
                     let st = self.sh.tor.state();
@@ -1971,6 +2017,24 @@ impl App {
 
     /// Element hiding: site-specific rules on the first report from a page, then generic rules for
     /// the classes and ids the page uses (the page reports new ones as it changes).
+    /// Make WebView2's extensions match Settings (the ones you turned off stay off).
+    fn apply_extension_states(&self) {
+        #[cfg(windows)]
+        {
+            let off = self.settings().disabled_extensions;
+            let wanted: Vec<(String, bool)> = extinstall::list()
+                .into_iter()
+                .filter_map(|e| {
+                    let id = self.ext_folder_ids.get(&e.folder).or_else(|| self.ext_ids.get(&e.name)).or_else(|| self.ext_ids.values().find(|v| **v == e.folder))?;
+                    Some((id.clone(), !off.contains(&e.folder)))
+                })
+                .collect();
+            if let Some(t) = self.tabs.iter().find(|t| t.kind == TabKind::Normal).filter(|_| !wanted.is_empty()) {
+                winhooks::set_extensions_enabled(&t.webview, wanted);
+            }
+        }
+    }
+
     /// chrome-extension:// address of an extension's pop-up (or options) page.
     pub fn ext_url(&self, folder: &str, options: bool) -> Option<String> {
         let e = extinstall::list().into_iter().find(|e| e.folder == folder)?;
@@ -2439,4 +2503,42 @@ impl eframe::App for App {
         self.sh.store.lock().unwrap().save();
         self.sh.tor.stop();
     }
+}
+
+/// The image in the clipboard as base64 (copied pixels as PNG, or a copied image file), with
+/// its type and size; None when there's no image.
+fn clipboard_image() -> Option<(String, &'static str, u32, u32)> {
+    use base64::Engine;
+    let mut cb = arboard::Clipboard::new().ok()?;
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    if let Ok(img) = cb.get_image() {
+        let (w, h) = (img.width as u32, img.height as u32);
+        if w == 0 || h == 0 || (w as u64) * (h as u64) > 50_000_000 {
+            return None;
+        }
+        let mut out = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut out, w, h);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.set_compression(png::Compression::Fast);
+            let mut wr = enc.write_header().ok()?;
+            wr.write_image_data(&img.bytes).ok()?;
+        }
+        return Some((b64(&out), "image/png", w, h));
+    }
+    // A single image file copied in Explorer.
+    let files = cb.get().file_list().ok()?;
+    let [path] = files.as_slice() else { return None };
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => return None,
+    };
+    let bytes = std::fs::read(path).ok().filter(|b| b.len() < 40 << 20)?;
+    Some((b64(&bytes), mime, 0, 0))
 }
