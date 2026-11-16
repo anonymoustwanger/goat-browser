@@ -450,10 +450,14 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: Op
     step("Checking Goat isn't running…", 0.82);
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let exe = dir.join(EXE);
+    // Old copies moved aside by earlier installs: gone unless something still runs them.
+    remove_old_exes(dir);
     if exe.exists() {
-        // A running .exe can't be replaced: moving it aside tells us whether it's in use.
-        let old = dir.join("Goat.old.exe");
-        let _ = std::fs::remove_file(&old);
+        // A running .exe can't be overwritten, but Windows lets it be renamed: move it aside
+        // under a fresh name (a leftover Goat.old.exe may itself still be in use) and write
+        // the new one in its place. The old copy is deleted now or by the next install.
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let old = dir.join(format!("Goat.old-{stamp}.exe"));
         if std::fs::rename(&exe, &old).is_err() {
             return Err("Goat is open. Close all Goat windows (including private and Tor windows), then click Try again.".into());
         }
@@ -515,6 +519,43 @@ fn install(rel: &Release, dir: &Path, desktop: bool, make_default: bool, adv: Op
     Ok(())
 }
 
+/// Delete Goat.old*.exe left by earlier installs (skips any still running).
+fn remove_old_exes(dir: &Path) {
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_lowercase();
+            if n.starts_with("goat.old") && n.ends_with(".exe") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// Force-close any Goat process still running from this folder (hidden standby windows,
+/// copies left over from older versions). Never this installer itself.
+fn kill_running(dir: &Path) {
+    #[cfg(windows)]
+    {
+        let d = dir.display().to_string().replace('\'', "''");
+        let me = std::process::id();
+        let ps = format!(
+            "Get-Process | Where-Object {{ $_.Id -ne {me} -and $_.Path -and $_.Path.StartsWith('{d}\\', [StringComparison]::OrdinalIgnoreCase) }} | Stop-Process -Force -ErrorAction SilentlyContinue"
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .creation_flags_hidden()
+            .status();
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    #[cfg(not(windows))]
+    let _ = dir;
+}
+
+/// True once nothing is running Goat.exe (it can be opened for writing).
+fn exe_free(exe: &Path) -> bool {
+    !exe.exists() || std::fs::OpenOptions::new().write(true).open(exe).is_ok()
+}
+
 fn silent_update(dir: &Path, relaunch: bool) {
     let log = |m: &str| {
         let _ = std::fs::write(std::env::temp_dir().join("goat-update.log"), format!("{} {m}\n", chrono::Local::now().to_rfc3339()));
@@ -523,15 +564,17 @@ fn silent_update(dir: &Path, relaunch: bool) {
         log("this installer has no Goat inside");
         return;
     };
-    // Wait (up to 2 minutes) until every Goat window has closed.
+    // Wait (up to 20 seconds) for Goat to close. If something still holds Goat.exe after
+    // that (e.g. a hidden window), install anyway: the old file is moved aside, not overwritten.
     let exe = dir.join(EXE);
-    let probe = dir.join("Goat.updating.exe");
-    for _ in 0..240 {
-        if !exe.exists() || std::fs::rename(&exe, &probe).is_ok() {
-            let _ = std::fs::rename(&probe, &exe);
+    for _ in 0..40 {
+        if exe_free(&exe) {
             break;
         }
         std::thread::sleep(Duration::from_millis(500));
+    }
+    if !exe_free(&exe) {
+        kill_running(dir);
     }
     #[cfg(windows)]
     let desktop = desktop_link().exists();
@@ -549,13 +592,12 @@ fn silent_update(dir: &Path, relaunch: bool) {
 fn uninstall(dir: &Path, remove_data: bool, step: &dyn Fn(&str, f32)) -> Result<(), String> {
     step("Checking Goat isn't running…", 0.1);
     let exe = dir.join(EXE);
-    if exe.exists() {
-        let probe = dir.join("Goat.closing.exe");
-        if std::fs::rename(&exe, &probe).is_err() {
-            return Err("Goat is open. Close all Goat windows, then try again.".into());
-        }
-        let _ = std::fs::rename(&probe, &exe);
+    // Hidden Goat processes (standby windows, old copies) would keep the files locked.
+    kill_running(dir);
+    if !exe_free(&exe) {
+        return Err("Goat is still running. Restart Windows, then uninstall again.".into());
     }
+    remove_old_exes(dir);
     #[cfg(windows)]
     {
         step("Removing shortcuts…", 0.3);
@@ -584,9 +626,14 @@ fn schedule_self_delete(dir: &Path) {
     }
     #[cfg(windows)]
     {
-        let cmd = format!("ping 127.0.0.1 -n 4 >nul & rmdir /s /q \"{}\"", dir.display());
-        let _ = std::process::Command::new("cmd")
-            .args(["/d", "/c", &cmd])
+        // Wait for this uninstaller to close, then keep trying for a minute.
+        let d = dir.display().to_string().replace('\'', "''");
+        let me = std::process::id();
+        let ps = format!(
+            "Wait-Process -Id {me} -ErrorAction SilentlyContinue; for ($i = 0; $i -lt 60; $i++) {{ Remove-Item -LiteralPath '{d}' -Recurse -Force -ErrorAction SilentlyContinue; if (-not (Test-Path -LiteralPath '{d}')) {{ break }}; Start-Sleep -Seconds 1 }}"
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps])
             .current_dir(std::env::temp_dir())
             .creation_flags_hidden()
             .spawn();

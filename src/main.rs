@@ -2333,6 +2333,8 @@ impl App {
             }
             Cmd::InstallUpdate => {
                 if let Some(u) = self.update.clone() {
+                    #[cfg(windows)]
+                    instance::standby_quit(&store::launch().profile);
                     if updater::run(&u, true) {
                         self.update_started = true;
                         self.ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
@@ -3286,6 +3288,8 @@ impl eframe::App for App {
         // A downloaded update installs once Goat has closed.
         if let Some(u) = &self.update {
             if self.settings().auto_update && !self.update_started {
+                #[cfg(windows)]
+                instance::standby_quit(&store::launch().profile);
                 updater::run(u, false);
             }
         }
