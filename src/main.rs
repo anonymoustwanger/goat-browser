@@ -738,10 +738,15 @@ fn main() -> eframe::Result<()> {
                 });
                 // Gone with the window that started it (another window starts a new one).
                 if let Some(parent) = std::env::args().find_map(|a| a.strip_prefix("--standby-for=").and_then(|p| p.parse::<u32>().ok())) {
-                    std::thread::spawn(move || loop {
-                        std::thread::sleep(std::time::Duration::from_secs(5));
-                        if !STANDBY_ADOPTED.load(Ordering::SeqCst) && !store::process_alive(parent) {
-                            std::process::exit(0);
+                    std::thread::spawn(move || {
+                        // Hold a handle to the parent and wait on it: a polled process id can be
+                        // reused by another program, which kept old standbys alive for ever.
+                        store::wait_for_exit(parent);
+                        loop {
+                            if !STANDBY_ADOPTED.load(Ordering::SeqCst) {
+                                std::process::exit(0);
+                            }
+                            std::thread::sleep(std::time::Duration::from_secs(5));
                         }
                     });
                 }
@@ -846,8 +851,10 @@ fn main() -> eframe::Result<()> {
     );
     if let Err(e) = &result {
         crashlog::write("startup error", &e.to_string());
+        return result;
     }
-    result
+    // Leftover threads (pipe listeners etc.) must not keep the process around.
+    std::process::exit(0);
 }
 
 /// The Goat browser logo.
@@ -3282,6 +3289,16 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // The hidden standby window goes with us (another open window starts a new one).
+        #[cfg(windows)]
+        if !self.standby && self.window_kind == TabKind::Normal {
+            instance::standby_quit(&store::launch().profile);
+        }
+        // Never linger after closing: if shutting down the web engine hangs, end anyway.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            std::process::exit(0);
+        });
         self.save_session();
         self.sh.store.lock().unwrap().save();
         self.sh.tor.stop();

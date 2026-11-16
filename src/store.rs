@@ -484,6 +484,22 @@ pub fn process_alive(pid: u32) -> bool {
     }
 }
 
+/// Block until the process ends (returns at once if it's already gone).
+pub fn wait_for_exit(pid: u32) {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE};
+        if let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            WaitForSingleObject(h, INFINITE);
+            let _ = windows::Win32::Foundation::CloseHandle(h);
+        }
+    }
+    #[cfg(not(windows))]
+    while process_alive(pid) {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
 pub static READ_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn now() -> i64 {
