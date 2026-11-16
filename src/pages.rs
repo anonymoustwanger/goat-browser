@@ -378,6 +378,8 @@ fn api_call(sh: &Arc<Shared>, api: &str, body: &[u8]) -> Resp {
             Ok(new) => {
                 sh.adblock.set_enabled(new.adblock);
                 s.data.settings = new;
+                // A shorter history setting takes effect straight away.
+                s.prune_history();
                 s.save();
                 drop(s);
                 notify(Notice::StoreChanged);
@@ -926,7 +928,7 @@ fn history(s: &Store, look: &Look, q: &str) -> Resp {
     }
     let total = format!("{} visits saved", s.data.history.len());
     let empty = if n == 0 {
-        if s.data.settings.save_history {
+        if s.history_days() != 0 {
             "<p class=\"hempty\">No history yet. Pages you visit in normal tabs show up here (private and Tor tabs never do).</p>"
         } else {
             "<p class=\"hempty\">History is turned off in Settings.</p>"
@@ -1349,10 +1351,7 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
         </div>
       </div>
       <label class="row"><span><b>History</b><small>Pages you visit in normal tabs. Private and Tor tabs are never saved. <a href="INTERNAL/history" class="inlink">Open history</a></small></span>
-        <select data-key="save_history" data-bool="1">
-          <option value="1" HIST_ON>Save history</option>
-          <option value="0" HIST_OFF>Don't save history</option>
-        </select>
+        <select data-key="history_days" data-number="1">HISTOPTS</select>
       </label>
       <label class="row"><span><b>Remove tracking from links</b><small>Strips tags like utm_source, fbclid and gclid from addresses you open.</small></span>
         TOGGLE_STRIP
@@ -1914,8 +1913,13 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_STANDBY", &toggle("tear_standby", st.tear_standby))
         .replace("TOGGLE_RESTORE", &toggle("restore_tabs", st.restore_tabs))
         .replace("TOGGLE_PIP", &toggle("pip_button", st.pip_button))
-        .replace("HIST_ON", if st.save_history { "selected" } else { "" })
-        .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
+        .replace("HISTOPTS", &{
+            let cur = st.history_days.unwrap_or(if st.save_history { -1 } else { 0 });
+            [(0, "Don't save history"), (1, "Keep for 1 day"), (7, "Keep for 7 days"), (30, "Keep for 30 days"), (90, "Keep for 90 days"), (365, "Keep for 1 year"), (-1, "Keep forever")]
+                .iter()
+                .map(|(v, l)| format!("<option value=\"{v}\"{}>{l}</option>", if cur == *v { " selected" } else { "" }))
+                .collect::<String>()
+        })
         .replace("ABSTATUS", &esc(&abstatus))
         .replace("TOGGLE_AB", &toggle("adblock", st.adblock))
         .replace("LVL_ADS", &lvl("ads", "Ads only", "Lightest. Ads blocked, trackers allowed."))

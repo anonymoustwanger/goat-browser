@@ -135,6 +135,8 @@ pub fn test_shared() -> Arc<Shared> {
         allow_http: Default::default(),
         net_privacy: Default::default(),
         ext_sites: Default::default(),
+        cookie_results: Default::default(),
+        next_cookie_req: Default::default(),
     })
 }
 

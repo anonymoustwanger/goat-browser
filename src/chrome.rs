@@ -1162,7 +1162,7 @@ impl App {
                     d.remove::<bool>(Id::new("addr-keep-text"));
                 }
             });
-        } else if out.response.gained_focus() || select_all {
+        } else if select_all || (out.response.gained_focus() && !self.addr_editing) {
             self.addr_editing = true;
             let n = self.addr.chars().count();
             out.state.cursor.set_char_range(Some(CCursorRange::two(CCursor::new(0), CCursor::new(n))));
@@ -1187,16 +1187,17 @@ impl App {
                 self.sugg_sel = if self.sugg.is_empty() { None } else { Some(0) };
             }
             let n = self.sugg.len();
-            if n > 0 {
+            // The list shows whenever something is typed: the search row is always there.
+            if !self.addr.trim().is_empty() {
                 // Positions: None (search row), then 0..n.
-                if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+                if n > 0 && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
                     self.sugg_sel = match self.sugg_sel {
                         None => Some(0),
                         Some(s) if s + 1 < n => Some(s + 1),
                         Some(_) => None,
                     };
                 }
-                if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+                if n > 0 && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
                     self.sugg_sel = match self.sugg_sel {
                         None => Some(n - 1),
                         Some(0) => None,

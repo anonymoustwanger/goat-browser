@@ -372,7 +372,7 @@ async function applySettings(patch) {
   if (!['off', 'standard', 'strict'].includes(settings.privacy.fingerprint)) settings.privacy.fingerprint = 'standard';
   settings.privacy.stripTracking = settings.privacy.stripTracking !== false;
   settings.adblock.skipExtensions = settings.adblock.skipExtensions !== false;
-  if (![0, 7, 30, 90, 365, -1].includes(Number(settings.history.keepDays))) settings.history.keepDays = 90;
+  if (![0, 1, 7, 30, 90, 365, -1].includes(Number(settings.history.keepDays))) settings.history.keepDays = 90;
   settings.history.keepDays = Number(settings.history.keepDays);
   if (!['ask', 'allow', 'block'].includes(settings.privacy.webauthn)) settings.privacy.webauthn = 'ask';
   for (const k of ['isolateSites', 'trimReferrers', 'blockPrefetch', 'blockThirdPartyFonts']) settings.privacy[k] = !!settings.privacy[k];
@@ -2214,7 +2214,7 @@ function pruneHistory(save) {
   if (history.length > HISTORY_MAX) history = history.slice(history.length - HISTORY_MAX);
   if (save || history.length !== before) saveHistorySoon();
 }
-setInterval(() => pruneHistory(false), 6 * 3600000).unref();
+setInterval(() => pruneHistory(false), 3600000).unref();
 
 function recordVisit(tab, url, inPage = false) {
   if (tab.private || !settings || settings.history.keepDays === 0) return;

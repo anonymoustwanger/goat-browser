@@ -13,6 +13,10 @@ pub struct Settings {
     pub home_page: String,
     pub show_bookmarks_bar: bool,
     pub save_history: bool,
+    /// How long history is kept: 0 = don't save, -1 = forever, else days. None only in data
+    /// from before this setting (filled from `save_history` on load).
+    #[serde(default)]
+    pub history_days: Option<i64>,
     pub theme: String,
     pub animations: bool,
     pub adblock: bool,
@@ -106,6 +110,7 @@ impl Default for Settings {
             home_page: "newtab".into(),
             show_bookmarks_bar: true,
             save_history: true,
+            history_days: Some(90),
             theme: "system".into(),
             animations: true,
             adblock: true,
@@ -500,7 +505,38 @@ impl Store {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         crate::themes::set_custom(&data.settings.custom_themes);
-        Self { data, path }
+        let mut st = Self { data, path };
+        // Older data: history on means keep it forever, off means don't save.
+        if st.data.settings.history_days.is_none() {
+            st.data.settings.history_days = Some(if st.data.settings.save_history { -1 } else { 0 });
+        }
+        if st.prune_history() {
+            st.save();
+        }
+        st
+    }
+
+    /// Days of history to keep: 0 = none, -1 = forever.
+    pub fn history_days(&self) -> i64 {
+        self.data.settings.history_days.unwrap_or(if self.data.settings.save_history { -1 } else { 0 })
+    }
+
+    /// Drop visits older than the history setting allows. True if anything was removed.
+    pub fn prune_history(&mut self) -> bool {
+        let days = self.history_days();
+        self.data.settings.save_history = days != 0;
+        let before = self.data.history.len();
+        match days {
+            -1 => {}
+            0 => self.data.history.clear(),
+            d => {
+                let cutoff = now() - d * 86_400;
+                if self.data.history.first().is_some_and(|v| v.time < cutoff) {
+                    self.data.history.retain(|v| v.time >= cutoff);
+                }
+            }
+        }
+        self.data.history.len() != before
     }
 
     #[cfg(test)]
@@ -566,9 +602,10 @@ impl Store {
     }
 
     pub fn record_visit(&mut self, url: &str, title: &str) {
-        if !self.data.settings.save_history {
+        if self.history_days() == 0 {
             return;
         }
+        self.prune_history();
         // Collapse reloads / redirects of the same URL.
         if let Some(last) = self.data.history.last_mut() {
             if last.url == url {
@@ -698,6 +735,21 @@ pub fn host_of(u: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_days() {
+        let mut s = Store::in_memory();
+        s.data.history.push(Visit { url: "https://old.com/".into(), title: "".into(), time: now() - 10 * 86_400 });
+        s.data.history.push(Visit { url: "https://new.com/".into(), title: "".into(), time: now() - 3600 });
+        s.data.settings.history_days = Some(-1);
+        assert!(!s.prune_history());
+        s.data.settings.history_days = Some(7);
+        assert!(s.prune_history());
+        assert_eq!(s.data.history.len(), 1);
+        s.data.settings.history_days = Some(0);
+        s.prune_history();
+        assert!(s.data.history.is_empty() && !s.data.settings.save_history);
+    }
+
     #[test]
     fn bookmarks_and_history() {
         let mut s = Store::in_memory();

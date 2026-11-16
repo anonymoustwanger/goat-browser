@@ -333,8 +333,13 @@ impl App {
             Popup::Volume => "pop-up window: volume",
             Popup::TorCircuit => "pop-up window: tor circuit",
         });
+        let mut suggest_took_focus = false;
         ctx.show_viewport_immediate(vid, builder, |ui, _class| {
             let pctx = ui.ctx().clone();
+            // The suggestions list must never keep the keyboard: typing stays in the address bar.
+            if popup == Popup::Suggest && closing.is_none() && pctx.input(|i| i.viewport().focused) == Some(true) {
+                suggest_took_focus = true;
+            }
             // The zoom bubble closes on its own unless the pointer is on it.
             if closing.is_none() && popup == Popup::Zoom {
                 let t = now(&pctx);
@@ -447,6 +452,10 @@ impl App {
                 cmds.push(c);
             }
         });
+        if suggest_took_focus && self.addr_editing && matches!(self.popup, Some((Popup::Suggest, _))) {
+            self.addr_refocus = true;
+            ctx.request_repaint();
+        }
         if became_ready {
             self.popup_vis_frames = 0;
             self.popup_ready = true;

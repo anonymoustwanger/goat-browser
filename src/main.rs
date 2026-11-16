@@ -410,6 +410,7 @@ pub struct App {
     ready_pid: Option<u32>,
     shown_frames: u32,
     last_standby_check: f64,
+    last_history_prune: f64,
     /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
     pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
@@ -681,6 +682,7 @@ fn main() -> eframe::Result<()> {
                 ready_pid: std::env::args().find_map(|a| a.strip_prefix("--ready-pid=").and_then(|p| p.parse().ok())),
                 shown_frames: 0,
                 last_standby_check: 0.0,
+                last_history_prune: 0.0,
                 site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
@@ -2378,7 +2380,7 @@ impl App {
                 }
                 self.sugg.retain(|(u, _)| *u != url);
                 self.sugg_sel = self.sugg_sel.filter(|&i| i < self.sugg.len());
-                if self.sugg.is_empty() && matches!(self.popup, Some((Popup::Suggest, _))) {
+                if self.sugg.is_empty() && self.addr.trim().is_empty() && matches!(self.popup, Some((Popup::Suggest, _))) {
                     self.popup = None;
                 }
                 self.addr_refocus = true;
@@ -2913,6 +2915,14 @@ impl App {
 
     fn housekeeping(&mut self, ctx: &egui::Context) {
         let t = now(ctx);
+        // Old history goes even if Goat stays open for days.
+        if t - self.last_history_prune > 3600.0 {
+            self.last_history_prune = t;
+            let mut s = self.sh.store.lock().unwrap();
+            if s.prune_history() {
+                s.save();
+            }
+        }
         // Standby window: keep one ready while a normal window of this profile is open.
         #[cfg(windows)]
         if t - self.last_standby_check > 2.0 && self.window_kind == TabKind::Normal && !store::no_gpu_window() && t > 3.0 {
