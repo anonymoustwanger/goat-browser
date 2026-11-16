@@ -209,7 +209,8 @@ const DEFAULT_SETTINGS = {
   dns: { provider: 'quad9', nextdnsId: '', custom: '' },
   adblock: { enabled: true, level: 'standard', allowlist: [], customRules: '', skipExtensions: true }, // skipExtensions: never filter extensions' own requests
   cookies: { blockThirdParty: true, clearOnExit: false },
-  pipButton: true, // a Pop out (picture in picture) button on videos
+  pipButton: true,
+  askDownload: true, // ask where to save each download // a Pop out (picture in picture) button on videos
   uploads: { paste: true }, // paste: offer the clipboard's image when a site asks for an image file
   extensions: { unpacked: [], hidden: [], pinned: null }, // pinned: ids shown in the toolbar
   proxy: { mode: 'system', type: 'socks5', host: '', port: '', bypass: '<local>', pacUrl: '', username: '', password: '' },
@@ -1117,6 +1118,16 @@ function configureSession(s) {
   s.registerPreloadScript({ type: 'frame', filePath: path.join(__dirname, 'fp-preload.js') });
   s.protocol.handle(SCHEME, serveInternal);
   s.on('will-download', (_e, item) => {
+    // Electron asks where to save unless a path is set: skip the question when it's turned off.
+    if (settings.askDownload === false) {
+      const dir = app.getPath('downloads');
+      const name = item.getFilename() || 'download';
+      const ext = path.extname(name);
+      const base = name.slice(0, name.length - ext.length);
+      let file = path.join(dir, name);
+      for (let i = 1; fs.existsSync(file); i++) file = path.join(dir, `${base} (${i})${ext}`);
+      item.setSavePath(file);
+    }
     item.once('done', (_ev, state) => {
       const name = item.getFilename();
       toast(state === 'completed' ? `Downloaded ${name}` : `Download ${state}: ${name}`);

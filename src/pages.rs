@@ -1223,6 +1223,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Paste images when uploading</b><small>When a site asks for an image and there's one in your clipboard, Goat offers to paste it instead of picking a file. Applies to pages opened from now on.</small></span>
         TOGGLE_PASTE
       </label>
+      <label class="row"><span><b>Ask where to save downloads</b><small>Choose a folder and name for each download. Off: downloads go straight to your Downloads folder.</small></span>
+        TOGGLE_ASKDL
+      </label>
       <label class="row"><span><b>Picture in picture</b><small>Hover a video for a Pop out button that keeps it playing in a small window on top. Applies to pages opened from now on.</small></span>
         TOGGLE_PIP
       </label>
@@ -1913,6 +1916,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_STANDBY", &toggle("tear_standby", st.tear_standby))
         .replace("TOGGLE_RESTORE", &toggle("restore_tabs", st.restore_tabs))
         .replace("TOGGLE_PIP", &toggle("pip_button", st.pip_button))
+        .replace("TOGGLE_ASKDL", &toggle("ask_download", st.ask_download))
         .replace("HISTOPTS", &{
             let cur = st.history_days.unwrap_or(if st.save_history { -1 } else { 0 });
             [(0, "Don't save history"), (1, "Keep for 1 day"), (7, "Keep for 7 days"), (30, "Keep for 30 days"), (90, "Keep for 90 days"), (365, "Keep for 1 year"), (-1, "Keep forever")]

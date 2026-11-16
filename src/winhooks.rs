@@ -768,3 +768,33 @@ pub fn hide_window_by_title(title: &str) {
         }
     }
 }
+
+/// Windows' own Save As window for a download. None when cancelled.
+pub fn save_as_dialog(suggested: &std::path::Path) -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT, SIGDN_FILESYSPATH};
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    unsafe {
+        let dlg: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let opts = dlg.GetOptions().unwrap_or_default();
+        let _ = dlg.SetOptions(opts | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM);
+        if let Some(name) = suggested.file_name() {
+            let _ = dlg.SetFileName(&HSTRING::from(name.to_string_lossy().as_ref()));
+        }
+        if let Some(ext) = suggested.extension() {
+            let _ = dlg.SetDefaultExtension(&HSTRING::from(ext.to_string_lossy().as_ref()));
+        }
+        // Downloads the first time; after that Windows remembers the last folder used.
+        if let Some(dir) = suggested.parent() {
+            if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(dir.as_os_str()), None) {
+                let _ = dlg.SetDefaultFolder(&item);
+            }
+        }
+        dlg.Show(Some(GetForegroundWindow())).ok()?;
+        let item = dlg.GetResult().ok()?;
+        let p = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let s = p.to_string().ok();
+        CoTaskMemFree(Some(p.0 as _));
+        s.map(std::path::PathBuf::from)
+    }
+}

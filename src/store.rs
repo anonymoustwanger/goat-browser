@@ -82,6 +82,8 @@ pub struct Settings {
     pub restore_tabs: bool,
     /// A "Pop out" (picture in picture) button on videos.
     pub pip_button: bool,
+    /// Ask where to save each download (Save As window).
+    pub ask_download: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -149,6 +151,7 @@ impl Default for Settings {
             tear_standby: true,
             restore_tabs: true,
             pip_button: true,
+            ask_download: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),

@@ -1215,6 +1215,14 @@ impl App {
                     std::thread::spawn(move || (sh.notify)(Notice::ExtensionInstalled(extinstall::install(extinstall::Source::Chrome, &ext))));
                     return false;
                 }
+                // Ask where to save it (Windows' Save As window); cancelling cancels the download.
+                #[cfg(windows)]
+                if sh_dl.store.lock().map(|s| s.data.settings.ask_download).unwrap_or(false) {
+                    match winhooks::save_as_dialog(path) {
+                        Some(p) => *path = p,
+                        None => return false,
+                    }
+                }
                 let _ = t_dl.send(Ev::DownloadStarted(url, path.display().to_string()));
                 c_dl.request_repaint();
                 true
