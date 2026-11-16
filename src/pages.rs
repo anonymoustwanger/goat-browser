@@ -1204,6 +1204,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
   <section id="general">
     <h2>General</h2>
     <div class="card">
+      <label class="row"><span><b>Reopen tabs on startup</b><small>Goat opens the tabs you had last time. They load when you click them.</small></span>
+        TOGGLE_RESTORE
+      </label>
       <label class="row"><span><b>Search engine</b><small>Used by the address bar and new tab page.</small></span>
         <select data-key="search_engine">ENGINES</select>
       </label>
@@ -1906,6 +1909,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_AUTOUPDATE", &toggle("auto_update", st.auto_update))
         .replace("TOGGLE_SITEICONS", &toggle("site_icons", st.site_icons))
         .replace("TOGGLE_STANDBY", &toggle("tear_standby", st.tear_standby))
+        .replace("TOGGLE_RESTORE", &toggle("restore_tabs", st.restore_tabs))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

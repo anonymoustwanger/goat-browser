@@ -468,7 +468,7 @@ impl App {
         let tabs: Vec<(u32, String, String, bool, TabKind, f64, Option<egui::TextureId>)> = self
             .tabs
             .iter()
-            .map(|t| (t.id, t.title.clone(), t.url.clone(), t.loading, t.kind, t.born, t.favicon.as_ref().filter(|_| icons_on).map(|f| f.1.id())))
+            .map(|t| (t.id, t.title.clone(), t.url.clone(), t.loading, t.kind, t.born, t.favicon.as_ref().filter(|_| icons_on).map(|f| f.1.id()).or_else(|| if t.pending.is_some() { self.site_icon(&t.url) } else { None })))
             .collect();
         let mut rects = std::collections::HashMap::new();
         for (i, (id, title, url, loading, kind, born, icon)) in tabs.into_iter().enumerate() {

@@ -74,6 +74,8 @@ pub struct Settings {
     pub site_icons: bool,
     /// Keep a hidden window ready so tabs dragged out of the strip open instantly.
     pub tear_standby: bool,
+    /// Bring back the main window's tabs when Goat starts.
+    pub restore_tabs: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -138,6 +140,7 @@ impl Default for Settings {
             auto_update: true,
             site_icons: true,
             tear_standby: true,
+            restore_tabs: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
@@ -197,6 +200,16 @@ pub struct Data {
     pub history: Vec<Visit>,
     pub downloads: Vec<Download>,
     pub next_id: u64,
+    /// Open tabs of the main window (for "Reopen tabs on startup"), and which one was showing.
+    pub session: Vec<SavedTab>,
+    pub session_active: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedTab {
+    pub url: String,
+    pub title: String,
 }
 
 pub struct Store {

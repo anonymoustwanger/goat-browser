@@ -300,6 +300,8 @@ pub struct Tab {
     pub playing: bool,
     /// The page's icon: (site it's for, picture).
     pub favicon: Option<(String, egui::TextureHandle)>,
+    /// A reopened tab that hasn't loaded yet (it loads when you first show it).
+    pub pending: Option<String>,
 }
 
 /// Browser profiles: the normal one (saved) and an in-memory one for Tor tabs.
@@ -741,6 +743,7 @@ fn main() -> eframe::Result<()> {
                     });
                 }
             }
+            #[cfg(windows)]
             if window_kind == TabKind::Normal && store::launch().window.is_empty() && !standby {
                 let sh = app.sh.clone();
                 instance::listen(&store::launch().profile, move |req| {
@@ -802,8 +805,36 @@ fn main() -> eframe::Result<()> {
             } else {
                 // First tab: the window handle is available now.
                 let url = app.start_url.take().unwrap();
-                if let Err(e) = app.open_tab(cc, &url, window_kind) {
-                    eprintln!("couldn't create the first tab: {e}");
+                // Reopen last time's tabs (asleep until shown), then any link Goat was opened with.
+                let saved = if app.session_window() && app.settings().restore_tabs {
+                    let s = app.sh.store.lock().unwrap();
+                    (s.data.session.clone(), s.data.session_active)
+                } else {
+                    (Vec::new(), 0)
+                };
+                let mut restored = 0;
+                for (k, t) in saved.0.iter().enumerate() {
+                    let active = k == saved.1.min(saved.0.len().saturating_sub(1));
+                    let first = if active { t.url.clone() } else { "about:blank".to_string() };
+                    if app.open_tab(cc, &first, window_kind).is_ok() {
+                        restored += 1;
+                        if let Some(tab) = app.tabs.last_mut() {
+                            tab.url = t.url.clone();
+                            tab.title = t.title.clone();
+                            if !active {
+                                tab.pending = Some(t.url.clone());
+                            }
+                        }
+                    }
+                }
+                if restored > 0 {
+                    let a = saved.1.min(app.tabs.len() - 1);
+                    app.select(a);
+                }
+                if restored == 0 || store::launch().url.is_some() {
+                    if let Err(e) = app.open_tab(cc, &url, window_kind) {
+                        eprintln!("couldn't create the first tab: {e}");
+                    }
                 }
                 STANDBY_READY.store(true, Ordering::SeqCst);
             }
@@ -1270,6 +1301,7 @@ impl App {
             painted: false,
             playing: false,
             favicon: None,
+            pending: None,
             born: now(&self.ctx),
         });
         self.active = self.tabs.len() - 1;
@@ -1285,6 +1317,10 @@ impl App {
             return;
         }
         self.active = idx;
+        // A reopened tab loads the first time you look at it.
+        if let Some(u) = self.tabs[idx].pending.take() {
+            let _ = self.tabs[idx].webview.load_url(&u);
+        }
         for (i, t) in self.tabs.iter().enumerate() {
             let _ = t.webview.set_visible(i == idx && t.painted);
         }
@@ -1793,6 +1829,9 @@ impl App {
             }
             Ev::Title(id, title) => {
                 self.show_painted(id);
+                if self.tab_index(id).is_some_and(|i| self.tabs[i].pending.is_some()) {
+                    return;
+                }
                 if let Some(i) = self.tab_index(id) {
                     let t = &mut self.tabs[i];
                     t.title = if title.trim().is_empty() { display_url(&t.url) } else { title };
@@ -1808,6 +1847,11 @@ impl App {
             Ev::Load(id, done, url) => {
                 if done {
                     self.show_painted(id);
+                }
+                // A reopened tab still asleep: it keeps its saved address and title.
+                if let Some(i) = self.tab_index(id).filter(|i| self.tabs[*i].pending.is_some()) {
+                    self.tabs[i].loading = false;
+                    return;
                 }
                 // A different site: its own icon comes with FaviconChanged (none until then).
                 if let Some(i) = self.tab_index(id) {
@@ -2805,6 +2849,40 @@ impl App {
         });
     }
 
+    /// The window whose tabs are saved and reopened: the profile's first normal window (not
+    /// private, Tor, no-GPU, the standby window or a window a tab was dragged into).
+    fn session_window(&self) -> bool {
+        self.window_kind == TabKind::Normal
+            && !store::no_gpu_window()
+            && !self.standby
+            && store::launch().window.is_empty()
+            && !std::env::args().any(|a| a == "--new-window")
+    }
+
+    /// Save the open tabs when they've changed (and when Goat closes).
+    fn save_session(&mut self) {
+        if !self.session_window() || store::READ_ONLY.load(Ordering::Relaxed) {
+            return;
+        }
+        let on = self.settings().restore_tabs;
+        let tabs: Vec<store::SavedTab> = if on {
+            self.tabs
+                .iter()
+                .filter(|t| t.kind == TabKind::Normal && !t.url.is_empty() && !t.url.starts_with("about:"))
+                .map(|t| store::SavedTab { url: t.pending.clone().unwrap_or_else(|| t.page_url.lock().unwrap().clone()), title: t.title.clone() })
+                .filter(|t| !t.url.is_empty() && !t.url.starts_with("about:"))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut s = self.sh.store.lock().unwrap();
+        if s.data.session != tabs || s.data.session_active != self.active {
+            s.data.session = tabs;
+            s.data.session_active = self.active;
+            s.save();
+        }
+    }
+
     /// No-GPU window: send this window's cookies to the normal window (logins made here carry
     /// over). `done` is set when it's finished.
     fn share_cookies_back(&mut self, done: Option<Arc<std::sync::atomic::AtomicBool>>) {
@@ -2854,6 +2932,7 @@ impl App {
         if t - self.last_housekeeping < 5.0 {
             return;
         }
+        self.save_session();
         if store::no_gpu_window() && t - self.last_cookie_share > 30.0 {
             self.share_cookies_back(None);
         }
@@ -3189,6 +3268,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_session();
         self.sh.store.lock().unwrap().save();
         self.sh.tor.stop();
         // A downloaded update installs once Goat has closed.
