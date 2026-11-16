@@ -209,6 +209,7 @@ const DEFAULT_SETTINGS = {
   dns: { provider: 'quad9', nextdnsId: '', custom: '' },
   adblock: { enabled: true, level: 'standard', allowlist: [], customRules: '', skipExtensions: true }, // skipExtensions: never filter extensions' own requests
   cookies: { blockThirdParty: true, clearOnExit: false },
+  pipButton: true, // a Pop out (picture in picture) button on videos
   uploads: { paste: true }, // paste: offer the clipboard's image when a site asks for an image file
   extensions: { unpacked: [], hidden: [], pinned: null }, // pinned: ids shown in the toolbar
   proxy: { mode: 'system', type: 'socks5', host: '', port: '', bypass: '<local>', pacUrl: '', username: '', password: '' },
@@ -2927,6 +2928,7 @@ function wirePagesIpc() {
     event.returnValue = { level: settings.privacy.fingerprint, webauthn: settings.privacy.webauthn, seed: fpSeed(top || url), chrome: CHROME_MAJOR, langs,
       googleCompat: isGoogleSignIn(url) ? firefoxUA() : '',
       paste: !!(settings.uploads && settings.uploads.paste),
+      pip: settings.pipButton !== false,
       extIds: event.sender.session === ses && event.senderFrame && !event.senderFrame.parent ? externallyConnectableIds(url) : [] };
   });
   // Paste images when uploading: the clipboard's image (copied pixels, or a copied image file).

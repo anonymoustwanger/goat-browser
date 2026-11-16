@@ -1182,15 +1182,26 @@ impl App {
             if self.addr != self.sugg_for {
                 self.sugg_for = self.addr.clone();
                 self.sugg = self.sh.store.lock().unwrap().suggest(&self.addr, 8);
-                self.sugg_sel = None;
+                // The top suggestion starts selected: Enter goes there. The "search" row above it
+                // (sugg_sel None) uses the typed text instead.
+                self.sugg_sel = if self.sugg.is_empty() { None } else { Some(0) };
             }
             let n = self.sugg.len();
             if n > 0 {
+                // Positions: None (search row), then 0..n.
                 if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-                    self.sugg_sel = Some(self.sugg_sel.map_or(0, |s| (s + 1) % n));
+                    self.sugg_sel = match self.sugg_sel {
+                        None => Some(0),
+                        Some(s) if s + 1 < n => Some(s + 1),
+                        Some(_) => None,
+                    };
                 }
                 if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-                    self.sugg_sel = Some(self.sugg_sel.map_or(n - 1, |s| (s + n - 1) % n));
+                    self.sugg_sel = match self.sugg_sel {
+                        None => Some(n - 1),
+                        Some(0) => None,
+                        Some(s) => Some(s - 1),
+                    };
                 }
                 if !matches!(self.popup, Some((Popup::Suggest, _)) | Some((Popup::Menu | Popup::Shield | Popup::Extensions, _))) {
                     self.popup = Some((Popup::Suggest, to_screen(&ctx, pos2(rect.left(), rect.bottom() + 4.0))));
@@ -1204,7 +1215,7 @@ impl App {
             let (enter, esc) = ctx.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
             let ctrl = ctx.input(|i| i.modifiers.command);
             if enter {
-                let target = match self.sugg_sel.and_then(|s| self.sugg.get(s)) {
+                let target = match self.sugg_sel.and_then(|s| self.sugg.get(s)).filter(|_| !ctrl) {
                     Some((u, _)) => u.clone(),
                     None if ctrl && !self.addr.contains(['.', ' ', ':', '/']) => format!("www.{}.com", self.addr.trim()),
                     None => self.addr.clone(),

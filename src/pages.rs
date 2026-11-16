@@ -1221,6 +1221,9 @@ fn settings(s: &Store, look: &Look, sh: &Shared) -> Resp {
       <label class="row"><span><b>Paste images when uploading</b><small>When a site asks for an image and there's one in your clipboard, Goat offers to paste it instead of picking a file. Applies to pages opened from now on.</small></span>
         TOGGLE_PASTE
       </label>
+      <label class="row"><span><b>Picture in picture</b><small>Hover a video for a Pop out button that keeps it playing in a small window on top. Applies to pages opened from now on.</small></span>
+        TOGGLE_PIP
+      </label>
       <label class="row"><span><b>HTTPS-only mode</b><small>Upgrades http:// to https://. To use http:// on a site anyway, type its http:// address in the address bar.</small></span>
         TOGGLE_HTTPS
       </label>
@@ -1910,6 +1913,7 @@ addEventListener('scroll', mark, {passive: true}); mark();
         .replace("TOGGLE_SITEICONS", &toggle("site_icons", st.site_icons))
         .replace("TOGGLE_STANDBY", &toggle("tear_standby", st.tear_standby))
         .replace("TOGGLE_RESTORE", &toggle("restore_tabs", st.restore_tabs))
+        .replace("TOGGLE_PIP", &toggle("pip_button", st.pip_button))
         .replace("HIST_ON", if st.save_history { "selected" } else { "" })
         .replace("HIST_OFF", if st.save_history { "" } else { "selected" })
         .replace("ABSTATUS", &esc(&abstatus))

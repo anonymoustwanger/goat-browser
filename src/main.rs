@@ -53,6 +53,7 @@ const INJECT_JS: &str = include_str!("inject.js");
 /// Per-tab volume (Goat's speaker button).
 const VOLUME_JS: &str = include_str!("volume.js");
 const PASTE_JS: &str = include_str!("paste.js");
+const PIP_JS: &str = include_str!("pip.js");
 
 /// Title of the floating preview of a tab being dragged out (so it's skipped when looking for
 /// the window under the mouse).
@@ -1127,6 +1128,7 @@ impl App {
             .with_initialization_script(&privacy::page_script(&settings))
             .with_initialization_script(VOLUME_JS)
             .with_initialization_script(if settings.paste_uploads { PASTE_JS } else { "" })
+            .with_initialization_script(if settings.pip_button { PIP_JS } else { "" })
             .with_initialization_script(if settings.adblock { YOUTUBE_JS } else { "" })
             .with_ipc_handler(move |req: Request<String>| {
                 let _g = crashlog::Scope::new("page message");

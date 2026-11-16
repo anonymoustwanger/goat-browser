@@ -209,7 +209,7 @@ impl App {
             }
             Popup::Suggest => {
                 card_w = self.addr_rect.width();
-                card_h = 8.0 + self.sugg.len() as f32 * 36.0;
+                card_h = 8.0 + (self.sugg.len() + 1) as f32 * 36.0;
             }
             Popup::PageMenu => {
                 rows = self.page_menu_rows();
@@ -1312,6 +1312,37 @@ impl App {
         let sugg = self.sugg.clone();
         if ctx.input(|i| !i.pointer.any_down() && !i.pointer.any_released()) {
             ctx.data_mut(|d| d.remove::<bool>(Id::new("sugg-x-down")));
+        }
+        // Top row: search (or go to) exactly what was typed.
+        {
+            let r = Rect::from_min_size(pos2(card_r.left() + 4.0, y), vec2(card_r.width() - 8.0, 36.0));
+            y += 36.0;
+            let resp = ui.interact(r, Id::new("sugg-search"), Sense::click());
+            let sel = self.sugg_sel.is_none() || resp.hovered();
+            let h = anim::hover(&ctx, Id::new("sugg-search-h"), sel, 0.14);
+            if h > 0.01 {
+                p.rect_filled(r, 10, alpha(pal.bg3, h));
+            }
+            let typed = self.addr.trim().to_string();
+            let looks_url = !typed.contains(' ') && (typed.contains('.') || typed.contains("://") || typed.starts_with("localhost"));
+            let ic = Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 8.0), Vec2::splat(16.0));
+            icons::draw(p, ic, if looks_url { icons::GLOBE } else { icons::SEARCH }, pal.muted, 1.5);
+            let tx = ic.right() + 10.0;
+            let avail = r.right() - 10.0 - tx;
+            let tr = text_elided(p, pos2(tx, r.center().y), &typed, font(13.0), pal.text, avail * 0.6, Align2::LEFT_CENTER);
+            let engine = {
+                let st = self.sh.store.lock().unwrap();
+                let id = st.data.settings.search_engine.clone();
+                crate::store::ENGINES.iter().find(|e| e.0 == id).unwrap_or(&crate::store::ENGINES[0]).1
+            };
+            let label = if looks_url { "— Go to address".to_string() } else { format!("— {engine} search") };
+            text_elided(p, pos2(tr.right() + 10.0, r.center().y), &label, font(12.0), pal.muted, (tx + avail - tr.right() - 10.0).max(10.0), Align2::LEFT_CENTER);
+            let pressed = ctx.input(|i| i.pointer.primary_pressed());
+            if resp.hovered() && pressed || resp.clicked() {
+                cmds.push(Cmd::Navigate(typed));
+                self.addr_editing = false;
+                return;
+            }
         }
         for (i, (url, title)) in sugg.iter().enumerate() {
             let r = Rect::from_min_size(pos2(card_r.left() + 4.0, y), vec2(card_r.width() - 8.0, 36.0));

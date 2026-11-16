@@ -76,6 +76,8 @@ pub struct Settings {
     pub tear_standby: bool,
     /// Bring back the main window's tabs when Goat starts.
     pub restore_tabs: bool,
+    /// A "Pop out" (picture in picture) button on videos.
+    pub pip_button: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -141,6 +143,7 @@ impl Default for Settings {
             site_icons: true,
             tear_standby: true,
             restore_tabs: true,
+            pip_button: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),
