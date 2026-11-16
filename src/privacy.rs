@@ -185,6 +185,32 @@ fn site_params(site: &str) -> &'static [&'static str] {
 }
 
 /// Registrable domain ("site"), e.g. news.bbc.co.uk → bbc.co.uk. Simple rules, no full list.
+/// Sites run by the same company that sign you in across each other (iCloud Mail signs in
+/// through apple.com, YouTube through google.com, Outlook through live.com…). Their cookies
+/// aren't treated as third-party between them, or you keep getting signed out.
+const RELATED_SITES: &[&[&str]] = &[
+    &["apple.com", "icloud.com", "icloud-content.com", "cdn-apple.com", "apple-cloudkit.com", "mzstatic.com", "me.com", "icloud.com.cn"],
+    &["google.com", "youtube.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "ggpht.com", "ytimg.com", "googlevideo.com", "gmail.com", "google.co.uk", "youtube-nocookie.com", "withgoogle.com"],
+    &["microsoft.com", "live.com", "microsoftonline.com", "office.com", "office365.com", "outlook.com", "sharepoint.com", "onedrive.com", "msn.com", "bing.com", "xbox.com", "skype.com", "msftauth.net", "msauth.net", "azure.com", "microsoft365.com", "live.net"],
+    &["roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com"],
+    &["discord.com", "discordapp.com", "discord.gg", "discordapp.net", "discord.media"],
+    &["github.com", "githubusercontent.com", "githubassets.com"],
+    &["reddit.com", "redditmedia.com", "redditstatic.com", "redd.it"],
+    &["x.com", "twitter.com", "twimg.com"],
+    &["facebook.com", "fbcdn.net", "instagram.com", "cdninstagram.com", "messenger.com", "whatsapp.com", "threads.net"],
+    &["twitch.tv", "ttvnw.net", "jtvnw.net"],
+    &["spotify.com", "scdn.co", "spotifycdn.com"],
+    &["paypal.com", "paypalobjects.com"],
+    &["steampowered.com", "steamcommunity.com", "steamstatic.com"],
+    &["proton.me", "protonmail.com"],
+    &["amazon.com", "amazon.co.uk", "media-amazon.com", "ssl-images-amazon.com"],
+];
+
+/// `a` and `b` (sites, as site_of gives them) belong to the same company.
+pub fn related_sites(a: &str, b: &str) -> bool {
+    a == b || RELATED_SITES.iter().any(|g| g.contains(&a) && g.contains(&b))
+}
+
 pub fn site_of(host: &str) -> String {
     let h = host.split(':').next().unwrap_or("").trim_start_matches("www.").to_lowercase();
     let parts: Vec<&str> = h.split('.').collect();

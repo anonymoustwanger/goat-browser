@@ -448,13 +448,34 @@ function topUrlFor(details) {
   const wc = details.webContents;
   try { return wc && !wc.isDestroyed() ? wc.getURL() : null; } catch { return null; }
 }
+// Sites run by the same company that sign you in across each other (iCloud Mail signs in
+// through apple.com, YouTube through google.com, Outlook through live.com…): their cookies
+// aren't treated as third-party between them, or you keep getting signed out.
+const RELATED_SITES = [
+  ["apple.com", "icloud.com", "icloud-content.com", "cdn-apple.com", "apple-cloudkit.com", "mzstatic.com", "me.com", "icloud.com.cn"],
+  ["google.com", "youtube.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "ggpht.com", "ytimg.com", "googlevideo.com", "gmail.com", "google.co.uk", "youtube-nocookie.com", "withgoogle.com"],
+  ["microsoft.com", "live.com", "microsoftonline.com", "office.com", "office365.com", "outlook.com", "sharepoint.com", "onedrive.com", "msn.com", "bing.com", "xbox.com", "skype.com", "msftauth.net", "msauth.net", "azure.com", "microsoft365.com", "live.net"],
+  ["roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com"],
+  ["discord.com", "discordapp.com", "discord.gg", "discordapp.net", "discord.media"],
+  ["github.com", "githubusercontent.com", "githubassets.com"],
+  ["reddit.com", "redditmedia.com", "redditstatic.com", "redd.it"],
+  ["x.com", "twitter.com", "twimg.com"],
+  ["facebook.com", "fbcdn.net", "instagram.com", "cdninstagram.com", "messenger.com", "whatsapp.com", "threads.net"],
+  ["twitch.tv", "ttvnw.net", "jtvnw.net"],
+  ["spotify.com", "scdn.co", "spotifycdn.com"],
+  ["paypal.com", "paypalobjects.com"],
+  ["steampowered.com", "steamcommunity.com", "steamstatic.com"],
+  ["proton.me", "protonmail.com"],
+  ["amazon.com", "amazon.co.uk", "media-amazon.com", "ssl-images-amazon.com"],
+];
+const relatedSites = (a, b) => a === b || RELATED_SITES.some((g) => g.includes(a) && g.includes(b));
 function isThirdParty(details) {
   if (details.resourceType === 'mainFrame') return false;
   const top = topUrlFor(details);
   if (!top || !/^https?:/.test(top)) return false;
   const a = siteOf(details.url);
   const b = siteOf(top);
-  return !!(a && b && a !== b);
+  return !!(a && b && !relatedSites(a, b));
 }
 // Requests made by an extension itself (its background worker, popup or options page).
 function fromExtension(details) {

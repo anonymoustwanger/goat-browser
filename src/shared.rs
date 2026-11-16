@@ -103,11 +103,13 @@ pub struct NetPrivacy {
     pub strip_hints: bool,
     pub block_prefetch: bool,
     pub skip_extensions: bool,
+    /// "Block third-party cookies" (cookies aren't sent to other sites a page loads from).
+    pub block_cookies: bool,
 }
 
 impl NetPrivacy {
     pub fn from(s: &crate::store::Settings) -> Self {
-        NetPrivacy { trim_referrers: s.trim_referrers, block_fonts: s.block_third_party_fonts, strip_hints: s.fingerprint != "off", block_prefetch: s.block_prefetch, skip_extensions: s.adblock_skip_extensions }
+        NetPrivacy { trim_referrers: s.trim_referrers, block_fonts: s.block_third_party_fonts, strip_hints: s.fingerprint != "off", block_prefetch: s.block_prefetch, skip_extensions: s.adblock_skip_extensions, block_cookies: s.block_third_party_cookies }
     }
 }
 

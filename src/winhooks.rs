@@ -79,7 +79,7 @@ pub fn install_adblock(
             // An extension's own server (e.g. RoPro's ropro.io), even when called from a page.
             // (Only for other sites: a site's own trackers on its own pages are still blocked.)
             let ext_site = page_site != req_site && sh.ext_sites.try_read().is_ok_and(|l| l.iter().any(|h| req_host == *h || req_host.ends_with(&format!(".{h}"))));
-            let third_party = rtype != "document" && !page_site.is_empty() && page_site != req_site && !ext_site;
+            let third_party = rtype != "document" && !page_site.is_empty() && !crate::privacy::related_sites(&page_site, &req_site) && !ext_site;
             let allowed_here = !ab.active_on(&host_of(&page));
             // Privacy headers (Goat's onBeforeSendHeaders).
             if let Ok(h) = request.Headers() {
@@ -90,7 +90,7 @@ pub fn install_adblock(
                         let _ = h.RemoveHeader(name);
                     }
                 }
-                if third_party {
+                if third_party && np.block_cookies {
                     let _ = h.RemoveHeader(w!("Cookie"));
                 }
                 if np.trim_referrers {
