@@ -303,6 +303,8 @@ pub struct Tab {
     pub favicon: Option<(String, egui::TextureHandle)>,
     /// A reopened tab that hasn't loaded yet (it loads when you first show it).
     pub pending: Option<String>,
+    /// Since when this tab (shown, not asleep) has sat on a blank page though it has an address.
+    pub blank_since: Option<f64>,
 }
 
 /// Browser profiles: the normal one (saved) and an in-memory one for Tor tabs.
@@ -411,6 +413,7 @@ pub struct App {
     shown_frames: u32,
     last_standby_check: f64,
     last_history_prune: f64,
+    opaque_done: bool,
     /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
     pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
@@ -683,6 +686,7 @@ fn main() -> eframe::Result<()> {
                 shown_frames: 0,
                 last_standby_check: 0.0,
                 last_history_prune: 0.0,
+                opaque_done: false,
                 site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
@@ -814,31 +818,7 @@ fn main() -> eframe::Result<()> {
                 // First tab: the window handle is available now.
                 let url = app.start_url.take().unwrap();
                 // Reopen last time's tabs (asleep until shown), then any link Goat was opened with.
-                let saved = if app.session_window() && app.settings().restore_tabs {
-                    let s = app.sh.store.lock().unwrap();
-                    (s.data.session.clone(), s.data.session_active)
-                } else {
-                    (Vec::new(), 0)
-                };
-                let mut restored = 0;
-                for (k, t) in saved.0.iter().enumerate() {
-                    let active = k == saved.1.min(saved.0.len().saturating_sub(1));
-                    let first = if active { t.url.clone() } else { "about:blank".to_string() };
-                    if app.open_tab(cc, &first, window_kind).is_ok() {
-                        restored += 1;
-                        if let Some(tab) = app.tabs.last_mut() {
-                            tab.url = t.url.clone();
-                            tab.title = t.title.clone();
-                            if !active {
-                                tab.pending = Some(t.url.clone());
-                            }
-                        }
-                    }
-                }
-                if restored > 0 {
-                    let a = saved.1.min(app.tabs.len() - 1);
-                    app.select(a);
-                }
+                let restored = app.restore_session(cc, window_kind);
                 if restored == 0 || store::launch().url.is_some() {
                     if let Err(e) = app.open_tab(cc, &url, window_kind) {
                         eprintln!("couldn't create the first tab: {e}");
@@ -1210,6 +1190,9 @@ impl App {
                 false
             })
             .with_download_started_handler(move |url, path| {
+                // First, before any Save As window: the aborted navigation that follows is expected.
+                #[cfg(windows)]
+                winhooks::note_download_started();
                 if let Some(ext) = extinstall::id_from_crx_download(&url, &path.display().to_string()) {
                     let sh = sh_dl.clone();
                     std::thread::spawn(move || (sh.notify)(Notice::ExtensionInstalled(extinstall::install(extinstall::Source::Chrome, &ext))));
@@ -1321,6 +1304,7 @@ impl App {
             playing: false,
             favicon: None,
             pending: None,
+            blank_since: None,
             born: now(&self.ctx),
         });
         self.active = self.tabs.len() - 1;
@@ -1338,6 +1322,10 @@ impl App {
         self.active = idx;
         // A reopened tab loads the first time you look at it.
         if let Some(u) = self.tabs[idx].pending.take() {
+            // Stays hidden until the real page has drawn.
+            self.tabs[idx].painted = false;
+            self.tabs[idx].loading = true;
+            self.tabs[idx].blank_since = None;
             let _ = self.tabs[idx].webview.load_url(&u);
         }
         for (i, t) in self.tabs.iter().enumerate() {
@@ -1847,10 +1835,10 @@ impl App {
                 });
             }
             Ev::Title(id, title) => {
-                self.show_painted(id);
                 if self.tab_index(id).is_some_and(|i| self.tabs[i].pending.is_some()) {
                     return;
                 }
+                self.show_painted(id);
                 if let Some(i) = self.tab_index(id) {
                     let t = &mut self.tabs[i];
                     t.title = if title.trim().is_empty() { display_url(&t.url) } else { title };
@@ -1864,13 +1852,14 @@ impl App {
                 }
             }
             Ev::Load(id, done, url) => {
-                if done {
-                    self.show_painted(id);
-                }
-                // A reopened tab still asleep: it keeps its saved address and title.
+                // A reopened tab still asleep: it keeps its saved address and title, and stays
+                // hidden (its blank page must never be what you see).
                 if let Some(i) = self.tab_index(id).filter(|i| self.tabs[*i].pending.is_some()) {
                     self.tabs[i].loading = false;
                     return;
+                }
+                if done {
+                    self.show_painted(id);
                 }
                 // A different site: its own icon comes with FaviconChanged (none until then).
                 if let Some(i) = self.tab_index(id) {
@@ -2456,7 +2445,10 @@ impl App {
             Cmd::OpenPage(page) => {
                 let url = format!("{INTERNAL_BASE}/{page}");
                 if let Some(i) = self.tabs.iter().position(|t| t.kind == self.window_kind && t.url.starts_with(&url)) {
-                    let _ = self.tabs[i].webview.reload();
+                    // A sleeping tab loads when selected; reloading its blank page would race that.
+                    if self.tabs[i].pending.is_none() {
+                        let _ = self.tabs[i].webview.reload();
+                    }
                     self.select(i);
                 } else if self.active_tab().is_some_and(|t| t.kind == self.window_kind && t.url.ends_with("/newtab")) {
                     self.load_active(&url);
@@ -2872,6 +2864,42 @@ impl App {
 
     /// The window whose tabs are saved and reopened: the profile's first normal window (not
     /// private, Tor, no-GPU, the standby window or a window a tab was dragged into).
+    /// Reopen last time's tabs: the one you were on loads, the rest wait until shown. Returns
+    /// how many came back.
+    fn restore_session(&mut self, window: &impl raw_window_handle::HasWindowHandle, window_kind: TabKind) -> usize {
+        let saved = if self.session_window() && self.settings().restore_tabs {
+            let s = self.sh.store.lock().unwrap();
+            (s.data.session.clone(), s.data.session_active)
+        } else {
+            (Vec::new(), 0)
+        };
+        let want = saved.1.min(saved.0.len().saturating_sub(1));
+        let mut restored = 0;
+        let mut active_tab = 0;
+        for (k, t) in saved.0.iter().enumerate() {
+            let active = k == want;
+            let first = if active { t.url.clone() } else { "about:blank".to_string() };
+            if self.open_tab(window, &first, window_kind).is_ok() {
+                if active {
+                    active_tab = self.tabs.len() - 1;
+                }
+                restored += 1;
+                if let Some(tab) = self.tabs.last_mut() {
+                    tab.url = t.url.clone();
+                    tab.title = t.title.clone();
+                    if !active {
+                        tab.pending = Some(t.url.clone());
+                    }
+                }
+            }
+        }
+        crashlog::debug(format!("restore: {} saved, {} reopened, active {} ({})", saved.0.len(), restored, active_tab, saved.0.get(want).map(|t| t.url.chars().take(60).collect::<String>()).unwrap_or_default()));
+        if restored > 0 {
+            self.select(active_tab);
+        }
+        restored
+    }
+
     fn session_window(&self) -> bool {
         self.window_kind == TabKind::Normal
             && !store::no_gpu_window()
@@ -2886,20 +2914,36 @@ impl App {
             return;
         }
         let on = self.settings().restore_tabs;
-        let tabs: Vec<store::SavedTab> = if on {
+        // (position in self.tabs, saved tab): tabs that can't be reopened are left out, so the
+        // active tab's number has to be counted among the saved ones, not among all tabs.
+        let kept: Vec<(usize, store::SavedTab)> = if on {
             self.tabs
                 .iter()
-                .filter(|t| t.kind == TabKind::Normal && !t.url.is_empty() && !t.url.starts_with("about:"))
-                .map(|t| store::SavedTab { url: t.pending.clone().unwrap_or_else(|| t.page_url.lock().unwrap().clone()), title: t.title.clone() })
-                .filter(|t| !t.url.is_empty() && !t.url.starts_with("about:"))
+                .enumerate()
+                .filter(|(_, t)| t.kind == TabKind::Normal)
+                .map(|(i, t)| {
+                    let url = t.pending.clone().unwrap_or_else(|| {
+                        let cur = t.page_url.lock().unwrap().clone();
+                        // A page still loading, or blank: fall back to the address Goat knows.
+                        if cur.is_empty() || cur.starts_with("about:") { t.url.clone() } else { cur }
+                    });
+                    (i, store::SavedTab { url, title: t.title.clone() })
+                })
+                .filter(|(_, t)| !t.url.is_empty() && !t.url.starts_with("about:"))
                 .collect()
         } else {
             Vec::new()
         };
+        let active = kept
+            .iter()
+            .position(|(i, _)| *i == self.active)
+            .or_else(|| kept.iter().rposition(|(i, _)| *i < self.active))
+            .unwrap_or(0);
+        let tabs: Vec<store::SavedTab> = kept.into_iter().map(|(_, t)| t).collect();
         let mut s = self.sh.store.lock().unwrap();
-        if s.data.session != tabs || s.data.session_active != self.active {
+        if s.data.session != tabs || s.data.session_active != active {
             s.data.session = tabs;
-            s.data.session_active = self.active;
+            s.data.session_active = active;
             s.save();
         }
     }
@@ -3002,6 +3046,22 @@ impl App {
         let active = self.active;
         for (i, tab) in self.tabs.iter_mut().enumerate() {
             if i == active {
+                // Never leave the tab you're looking at stuck on a blank page: if it has an
+                // address but still shows nothing after a few seconds, load that address.
+                let blank = {
+                    let cur = tab.page_url.lock().unwrap();
+                    cur.is_empty() || cur.starts_with("about:")
+                };
+                if blank && tab.pending.is_none() && !tab.url.is_empty() && !tab.url.starts_with("about:") {
+                    let since = *tab.blank_since.get_or_insert(t);
+                    if t - since > 4.0 {
+                        crashlog::debug(format!("blank tab {} → loading {}", tab.id, tab.url.chars().take(80).collect::<String>()));
+                        let _ = tab.webview.load_url(&tab.url);
+                        tab.blank_since = Some(t);
+                    }
+                } else {
+                    tab.blank_since = None;
+                }
                 tab.hidden_since = None;
                 if tab.low_mem {
                     tab.low_mem = false;
@@ -3122,8 +3182,17 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // One wait for the next screen refresh per frame (see `vsync` above).
+        // (Not while the window is being dragged: Windows runs the drag inside this very loop,
+        // and waiting here made the window lag behind the mouse.)
         #[cfg(windows)]
-        if unsafe { windows::Win32::Graphics::Dwm::DwmFlush() }.is_err() {
+        if !self.opaque_done {
+            self.opaque_done = true;
+            if !self.standby {
+                winhooks::make_opaque(frame);
+            }
+        }
+        #[cfg(windows)]
+        if !winhooks::in_move_size() && unsafe { windows::Win32::Graphics::Dwm::DwmFlush() }.is_err() {
             std::thread::sleep(std::time::Duration::from_millis(4));
         }
         #[cfg(target_os = "linux")]
@@ -3159,8 +3228,11 @@ impl eframe::App for App {
                 }
                 let url = self.start_url.take().unwrap_or_else(|| self.home_url());
                 if choice.is_empty() {
-                    if let Err(e) = self.open_tab(frame, &url, self.window_kind) {
-                        self.toast(format!("Couldn't open tab: {e}"));
+                    let restored = self.restore_session(frame, self.window_kind);
+                    if restored == 0 || store::launch().url.is_some() {
+                        if let Err(e) = self.open_tab(frame, &url, self.window_kind) {
+                            self.toast(format!("Couldn't open tab: {e}"));
+                        }
                     }
                 } else {
                     let start = store::launch().url.clone();

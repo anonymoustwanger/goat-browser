@@ -529,7 +529,16 @@ impl Store {
         if st.data.settings.history_days.is_none() {
             st.data.settings.history_days = Some(if st.data.settings.save_history { -1 } else { 0 });
         }
-        if st.prune_history() {
+        let mut changed = st.prune_history();
+        // A download left "in progress" by a window that closed (or crashed) never finishes.
+        let stale = now() - 1800;
+        for d in st.data.downloads.iter_mut() {
+            if d.state == "in_progress" && d.time < stale {
+                d.state = "failed".into();
+                changed = true;
+            }
+        }
+        if changed {
             st.save();
         }
         st

@@ -471,6 +471,18 @@ pub fn monitor_refresh(hwnd: isize) -> Option<u32> {
 
 /// Goat's own "can't reach this page" instead of the engine's Edge-branded one.
 /// A failed load opens `goat://neterror?u=…&e=…`; going back past it skips the dead entry.
+/// When a download last started (ms since the epoch). A navigation that turns into a download
+/// ends "aborted"; that must not replace the page with a "can't reach" error.
+static LAST_DOWNLOAD_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+pub fn note_download_started() {
+    LAST_DOWNLOAD_MS.store(epoch_ms(), std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn watch_load_errors(webview: &wry::WebView) {
     use std::{cell::RefCell, rc::Rc};
     unsafe {
@@ -507,6 +519,12 @@ pub fn watch_load_errors(webview: &wry::WebView) {
             let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
             let _ = args.WebErrorStatus(&mut status);
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                return Ok(());
+            }
+            // The link was a file download: the page stays as it was.
+            if status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED
+                && epoch_ms().saturating_sub(LAST_DOWNLOAD_MS.load(std::sync::atomic::Ordering::Relaxed)) < 15_000
+            {
                 return Ok(());
             }
             // The site answered (404, 500…): its own page shows.
@@ -796,5 +814,30 @@ pub fn save_as_dialog(suggested: &std::path::Path) -> Option<std::path::PathBuf>
         let s = p.to_string().ok();
         CoTaskMemFree(Some(p.0 as _));
         s.map(std::path::PathBuf::from)
+    }
+}
+
+/// The main window is created with a transparent surface (pop-ups need that surface format), and
+/// the window system then composes it as a see-through window, which makes dragging it jitter.
+/// Goat paints every pixel itself, so turn the see-through blending off for this window.
+pub fn make_opaque(frame: &eframe::Frame) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_ENABLE, DWM_BLURBEHIND};
+    use windows::Win32::Graphics::Gdi::HRGN;
+    let Ok(h) = frame.window_handle() else { return };
+    let RawWindowHandle::Win32(w) = h.as_raw() else { return };
+    unsafe {
+        let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE, fEnable: false.into(), hRgnBlur: HRGN::default(), fTransitionOnMaximized: false.into() };
+        let _ = DwmEnableBlurBehindWindow(HWND(w.hwnd.get() as _), &bb);
+    }
+}
+
+/// True while Windows is running its own window move/resize loop (the title bar drag).
+pub fn in_move_size() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GUITHREADINFO, GUI_INMOVESIZE};
+    unsafe {
+        let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        GetGUIThreadInfo(0, &mut info).is_ok() && (info.flags & GUI_INMOVESIZE).0 != 0
     }
 }
