@@ -1,0 +1,32 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg-2); color: var(--text); font: 12px system-ui, sans-serif; }
+body { display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; border-top: 1px solid var(--line); }
+#items { flex: 1; display: flex; gap: 6px; overflow: hidden; min-width: 0; }
+.card { position: relative; flex: 0 0 280px; height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px; box-sizing: border-box;
+  border-radius: 9px; background: color-mix(in srgb, var(--bg-3) 55%, transparent); transition: background .12s; animation: up .35s cubic-bezier(.2, .8, .2, 1) both; }
+.card:hover { background: var(--bg-3); }
+.card.done { cursor: pointer; }
+@keyframes up { from { opacity: 0; transform: translateY(8px); } }
+:root[data-motion="off"] .card { animation: none; }
+.ic { flex: 0 0 22px; height: 22px; position: relative; }
+.ic svg { position: absolute; inset: 0; width: 22px; height: 22px; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ring-bg { stroke: var(--line); }
+.ring { stroke: var(--accent); transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset .2s; }
+.paused .ring { stroke: var(--muted); }
+.glyph { stroke: var(--accent); }
+.failed .glyph, .cancelled .glyph, .paused .glyph { stroke: var(--muted); }
+.txt { flex: 1; min-width: 0; }
+.name, .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.name { font-weight: 600; }
+.cancelled .name { color: var(--muted); }
+.status { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.failed .status { color: var(--danger); }
+.btns { display: none; gap: 2px; }
+.card:hover .btns { display: flex; }
+button { all: unset; cursor: pointer; }
+.btns button, .x { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; }
+.btns button:hover, .x:hover { background: var(--bg); }
+.btns svg, .x svg { width: 13px; height: 13px; fill: none; stroke: var(--text); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.x { width: 26px; height: 26px; }
+.x svg { stroke: var(--muted); width: 14px; height: 14px; }
+.all { padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; }
+.all:hover { background: var(--bg-3); }

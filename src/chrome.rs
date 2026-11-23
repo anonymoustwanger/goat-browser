@@ -15,8 +15,9 @@ use crate::icons::{self, Icon};
 use crate::paint::{self, alpha, mix};
 use crate::themes::Palette;
 use crate::anim;
-use crate::{now, App, Cmd, Popup, TabKind, INTERNAL_BASE};
+use crate::{now, App, Cmd, DlState, Popup, TabKind, INTERNAL_BASE};
 
+pub const DL_H: f32 = 48.0;
 pub const STRIP_H: f32 = 38.0;
 pub const NAV_H: f32 = 44.0;
 pub const BM_H: f32 = 32.0;
@@ -252,9 +253,10 @@ impl App {
         let fs = self.fullscreen;
         let chrome_h = if fs { 0.0 } else { STRIP_H + NAV_H + if settings.show_bookmarks_bar { BM_H } else { 0.0 } };
         let margin = if maximized || fs { 0.0 } else { MARGIN };
+        let dl_h = if !fs && self.dl_bar && settings.download_bar && !self.dl_items.is_empty() { DL_H } else { 0.0 };
         self.content_rect = Rect::from_min_max(
             pos2(full.left() + margin, full.top() + chrome_h),
-            pos2(full.right() - margin, full.bottom() - margin),
+            pos2(full.right() - margin, full.bottom() - margin - dl_h),
         );
 
         self.shortcuts(&ctx, cmds);
@@ -324,6 +326,10 @@ impl App {
             }
         }
 
+        if dl_h > 0.0 {
+            let bar = Rect::from_min_max(pos2(self.content_rect.left(), self.content_rect.bottom()), pos2(self.content_rect.right(), self.content_rect.bottom() + dl_h));
+            self.draw_download_bar(ui, bar, &pal, cmds);
+        }
         self.draw_toast(ui, full, &pal, anim, cmds);
     }
 
@@ -1361,6 +1367,158 @@ impl App {
     }
 
     // ------------------------------------------------------------------ toast
+
+    /// The download bar: one card per download (newest first), "Show all" and close on the right.
+    fn draw_download_bar(&mut self, ui: &mut Ui, bar: Rect, pal: &Palette, cmds: &mut Vec<Cmd>) {
+        let ctx = ui.ctx().clone();
+        let p = ui.painter().clone();
+        p.rect_filled(bar, 0, pal.bg2);
+        p.line_segment([bar.left_top(), bar.right_top()], Stroke::new(1.0, pal.line));
+        // Right end: Show all, close.
+        let close = Rect::from_center_size(pos2(bar.right() - 20.0, bar.center().y), Vec2::splat(26.0));
+        let cr = ui.interact(close, Id::new("dlbar-close"), Sense::click()).on_hover_text("Close the download bar");
+        if cr.hovered() {
+            p.rect_filled(close, 7, pal.bg3);
+        }
+        icons::draw(&p, Rect::from_center_size(close.center(), Vec2::splat(14.0)), icons::CLOSE, pal.muted, 1.5);
+        if cr.clicked() {
+            cmds.push(Cmd::DownloadBarClose);
+        }
+        let all_w = text_width(ui, "Show all", font(12.0)) + 20.0;
+        let all = Rect::from_center_size(pos2(close.left() - 6.0 - all_w / 2.0, bar.center().y), vec2(all_w, 26.0));
+        let ar = ui.interact(all, Id::new("dlbar-all"), Sense::click());
+        p.rect_filled(all, 7, if ar.hovered() { pal.bg3 } else { alpha(pal.bg3, 0.0) });
+        p.rect_stroke(all, 7, Stroke::new(1.0, pal.line), StrokeKind::Inside);
+        p.text(all.center(), Align2::CENTER_CENTER, "Show all", font(12.0), pal.text);
+        if ar.clicked() {
+            cmds.push(Cmd::OpenPage("downloads"));
+        }
+        let mb = |b: i64| -> String {
+            let b = b.max(0) as f64;
+            if b >= 1e9 { format!("{:.2} GB", b / 1e9) } else if b >= 1e6 { format!("{:.1} MB", b / 1e6) } else { format!("{:.0} KB", (b / 1e3).max(1.0)) }
+        };
+        let mut x = bar.left() + 8.0;
+        let card_w = 280.0f32;
+        let mut animating = false;
+        let t_now = now(&ctx);
+        for d in &self.dl_items {
+            if x + card_w > all.left() - 8.0 {
+                break;
+            }
+            let r = Rect::from_min_size(pos2(x, bar.top() + 5.0), vec2(card_w, bar.height() - 10.0));
+            x += card_w + 6.0;
+            let id = Id::new(("dl", d.id));
+            let resp = ui.interact(r, id, Sense::click());
+            let h = anim::hover(&ctx, id.with("h"), resp.hovered(), 0.12);
+            p.rect_filled(r, 9, alpha(pal.bg3, 0.5 + 0.5 * h));
+            // Born: slide up into place.
+            let born = ((t_now - d.born) / 0.35).clamp(0.0, 1.0) as f32;
+            if born < 1.0 {
+                animating = true;
+            }
+            let mut pp = p.clone();
+            pp.set_opacity(anim::out_cubic(born));
+            let r = r.translate(vec2(0.0, 8.0 * (1.0 - anim::out_cubic(born))));
+            let name = std::path::Path::new(&d.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Download".into());
+            let frac = if d.total > 0 { (d.received as f64 / d.total as f64).clamp(0.0, 1.0) as f32 } else { 0.0 };
+            // Icon: a progress ring while running, a tick when done.
+            let ic = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), Vec2::splat(22.0));
+            let (icon, col) = match &d.state {
+                DlState::Done => (icons::CHECK, pal.accent),
+                DlState::Failed { .. } | DlState::Cancelled => (icons::WARN, pal.muted),
+                DlState::Paused => (icons::PAUSE, pal.muted),
+                DlState::Running => (icons::DOWNLOAD, pal.accent),
+            };
+            if matches!(d.state, DlState::Running | DlState::Paused) {
+                pp.circle_stroke(ic.center(), 10.0, Stroke::new(2.0, pal.line));
+                let sweep = if d.total > 0 { frac * std::f32::consts::TAU } else { std::f32::consts::FRAC_PI_2 };
+                let a0 = if d.total > 0 { -std::f32::consts::FRAC_PI_2 } else { (t_now * 4.0) as f32 };
+                if d.total <= 0 && d.state == DlState::Running {
+                    animating = true;
+                }
+                let n = ((sweep / std::f32::consts::TAU) * 40.0).ceil().max(2.0) as usize;
+                let pts: Vec<Pos2> = (0..=n).map(|k| ic.center() + Vec2::angled(a0 + sweep * k as f32 / n as f32) * 10.0).collect();
+                pp.add(egui::Shape::line(pts, Stroke::new(2.0, if d.state == DlState::Paused { pal.muted } else { pal.accent })));
+                icons::draw(&pp, Rect::from_center_size(ic.center(), Vec2::splat(11.0)), icon, col, 1.5);
+            } else {
+                icons::draw(&pp, Rect::from_center_size(ic.center(), Vec2::splat(15.0)), icon, col, 1.6);
+            }
+            let status = match &d.state {
+                DlState::Running => {
+                    let size = if d.total > 0 { format!("{} of {}", mb(d.received), mb(d.total)) } else { mb(d.received) };
+                    if d.speed > 1.0 {
+                        let left = if d.total > 0 { ((d.total - d.received).max(0) as f64 / d.speed) as u64 } else { 0 };
+                        let left = if d.total <= 0 { String::new() } else if left >= 3600 { format!(" · {} h {} min left", left / 3600, left % 3600 / 60) } else if left >= 60 { format!(" · {} min left", (left + 30) / 60) } else { format!(" · {left} s left") };
+                        format!("{size} · {}/s{left}", mb(d.speed as i64))
+                    } else {
+                        size
+                    }
+                }
+                DlState::Paused => format!("Paused · {}{}", mb(d.received), if d.total > 0 { format!(" of {}", mb(d.total)) } else { String::new() }),
+                DlState::Done => format!("{} · Done", mb(d.total.max(d.received))),
+                DlState::Cancelled => "Cancelled".into(),
+                DlState::Failed { reason, .. } => reason.clone(),
+            };
+            // Buttons on hover.
+            let mut btns: Vec<(&'static str, Icon, &str)> = Vec::new();
+            match &d.state {
+                DlState::Running => {
+                    btns.push(("pause", icons::PAUSE, "Pause"));
+                    btns.push(("cancel", icons::CLOSE, "Cancel"));
+                }
+                DlState::Paused => {
+                    btns.push(("resume", icons::PLAY, "Resume"));
+                    btns.push(("cancel", icons::CLOSE, "Cancel"));
+                }
+                DlState::Done => {
+                    if cfg!(windows) {
+                        btns.push(("folder", icons::FOLDER, "Show in folder"));
+                    }
+                    btns.push(("remove", icons::CLOSE, "Remove from bar"));
+                }
+                DlState::Failed { can_resume, .. } => {
+                    if *can_resume {
+                        btns.push(("resume", icons::RELOAD, "Try again"));
+                    }
+                    btns.push(("remove", icons::CLOSE, "Remove from bar"));
+                }
+                DlState::Cancelled => btns.push(("remove", icons::CLOSE, "Remove from bar")),
+            }
+            let bw = if h > 0.01 { btns.len() as f32 * 26.0 } else { 0.0 };
+            let tx = ic.right() + 10.0;
+            let tw = r.right() - 8.0 - bw - tx;
+            text_elided(&pp, pos2(tx, r.center().y - 8.0), &name, bold(12.0), if matches!(d.state, DlState::Cancelled) { pal.muted } else { pal.text }, tw, Align2::LEFT_CENTER);
+            let scol = if matches!(d.state, DlState::Failed { .. }) { pal.danger } else { pal.muted };
+            text_elided(&pp, pos2(tx, r.center().y + 8.0), &status, font(11.0), scol, tw, Align2::LEFT_CENTER);
+            let mut on_button = false;
+            if h > 0.01 {
+                let mut bx = r.right() - 6.0 - 24.0;
+                for (k, (what, icon, tip)) in btns.iter().enumerate().rev() {
+                    let b = Rect::from_min_size(pos2(bx, r.center().y - 12.0), Vec2::splat(24.0));
+                    bx -= 26.0;
+                    let br = ui.interact(b, id.with(("b", k)), Sense::click()).on_hover_text(*tip);
+                    if br.hovered() {
+                        on_button = true;
+                        pp.rect_filled(b, 6, pal.bg);
+                    }
+                    icons::draw(&pp, Rect::from_center_size(b.center(), Vec2::splat(13.0)), icon, alpha(pal.text, h), 1.5);
+                    if br.clicked() {
+                        cmds.push(Cmd::Download(d.id, what));
+                    }
+                }
+            }
+            // Click the card: open the file once it's there.
+            if resp.clicked() && !on_button && d.state == DlState::Done {
+                cmds.push(Cmd::Download(d.id, "open"));
+            }
+            if resp.hovered() && d.state == DlState::Done && !on_button {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+        }
+        if animating {
+            ctx.request_repaint();
+        }
+    }
 
     fn draw_toast(&mut self, ui: &mut Ui, full: Rect, pal: &Palette, anim: bool, cmds: &mut Vec<Cmd>) {
         let ctx = ui.ctx().clone();

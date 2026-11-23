@@ -49,6 +49,9 @@ pub const EXTERNAL: Icon = &[Path("M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5a.5.5
 pub const PIN: Icon = &[Path("M9.6 1.9 14 6.3l-1.3.4-2.9 2.9-.4 3.1-1.1 1.1-2.2-2.2-3 3-.9-.1v-.9l3-3-2.2-2.2 1.1-1.1 3.1-.4 2.9-2.9z")];
 pub const UP: Icon = &[Path("m4 10 4-4 4 4")];
 pub const DOWN: Icon = &[Path("m4 6 4 4 4-4")];
+pub const PAUSE: Icon = &[Path("M5.5 3.5v9M10.5 3.5v9")];
+pub const PLAY: Icon = &[Path("M5 3.2v9.6L12.6 8z")];
+pub const FOLDER: Icon = &[Path("M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z")];
 pub const CHECK: Icon = &[Path("m3.5 8.5 3 3 6-7")];
 pub const GLOBE: Icon = &[Circle(8.0, 8.0, 6.0), Path("M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14C6.2 12.3 5.4 10.3 5.4 8S6.2 3.7 8 2z")];
 // Window buttons (10×10 glyphs in a 16 box).

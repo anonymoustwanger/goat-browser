@@ -84,6 +84,8 @@ pub struct Settings {
     pub pip_button: bool,
     /// Ask where to save each download (Save As window).
     pub ask_download: bool,
+    /// A bar along the bottom showing downloads and their progress.
+    pub download_bar: bool,
     // ---- proxy
     /// system | none | manual
     pub proxy_mode: String,
@@ -152,6 +154,7 @@ impl Default for Settings {
             restore_tabs: true,
             pip_button: true,
             ask_download: true,
+            download_bar: true,
             proxy_mode: "system".into(),
             proxy_type: "socks5".into(),
             proxy_host: String::new(),

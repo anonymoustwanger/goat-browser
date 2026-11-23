@@ -875,3 +875,132 @@ pub fn opt_out_of_vrr() {
         let _ = RegCloseKey(key);
     }
 }
+
+use crate::DlEvent;
+
+thread_local! {
+    /// Running downloads, so the bar's buttons can cancel / pause / resume them.
+    static DL_OPS: std::cell::RefCell<std::collections::HashMap<u64, ICoreWebView2DownloadOperation>> = Default::default();
+}
+static NEXT_DL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Follow each download's progress (WebView2 only tells about progress to whoever asks).
+/// Runs after wry's own handler, so the Save As choice (or a cancel) is already made.
+pub fn watch_downloads(webview: &wry::WebView, on: impl Fn(DlEvent) + Clone + 'static) {
+    unsafe {
+        let Ok(c4) = webview.webview().cast::<ICoreWebView2_4>() else { return };
+        let h = webview2_com::DownloadStartingEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut cancel = windows::core::BOOL::default();
+            let _ = args.Cancel(&mut cancel);
+            if cancel.as_bool() {
+                return Ok(());
+            }
+            let Ok(op) = args.DownloadOperation() else { return Ok(()) };
+            let id = NEXT_DL.fetch_add(1, Ordering::Relaxed);
+            let mut p = PWSTR::null();
+            let path = if args.ResultFilePath(&mut p).is_ok() { take_pwstr(p) } else { String::new() };
+            let mut total = 0i64;
+            let _ = op.TotalBytesToReceive(&mut total);
+            on(DlEvent::Start { id, path, total });
+            DL_OPS.with(|m| m.borrow_mut().insert(id, op.clone()));
+            // Progress, at most ~8 times a second.
+            let last = std::rc::Rc::new(std::cell::Cell::new(std::time::Instant::now() - std::time::Duration::from_secs(1)));
+            let cb = on.clone();
+            let ph = webview2_com::BytesReceivedChangedEventHandler::create(Box::new(move |op, _| {
+                let Some(op) = op else { return Ok(()) };
+                if last.get().elapsed() < std::time::Duration::from_millis(120) {
+                    return Ok(());
+                }
+                last.set(std::time::Instant::now());
+                let (mut received, mut total) = (0i64, 0i64);
+                let _ = op.BytesReceived(&mut received);
+                let _ = op.TotalBytesToReceive(&mut total);
+                cb(DlEvent::Progress { id, received, total });
+                Ok(())
+            }));
+            let mut t = Default::default();
+            let _ = op.add_BytesReceivedChanged(&ph, &mut t);
+            let cb = on.clone();
+            let sh = webview2_com::StateChangedEventHandler::create(Box::new(move |op, _| {
+                let Some(op) = op else { return Ok(()) };
+                let mut st = COREWEBVIEW2_DOWNLOAD_STATE::default();
+                let _ = op.State(&mut st);
+                let mut p = PWSTR::null();
+                let path = if op.ResultFilePath(&mut p).is_ok() { take_pwstr(p) } else { String::new() };
+                let state = if st == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+                    crate::DlState::Done
+                } else if st == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+                    let mut why = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON::default();
+                    let _ = op.InterruptReason(&mut why);
+                    let mut can = windows::core::BOOL::default();
+                    let _ = op.CanResume(&mut can);
+                    if why == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED {
+                        crate::DlState::Cancelled
+                    } else if why == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED {
+                        crate::DlState::Paused
+                    } else {
+                        crate::DlState::Failed { reason: interrupt_text(why.0), can_resume: can.as_bool() }
+                    }
+                } else {
+                    let (mut received, mut total) = (0i64, 0i64);
+                    let _ = op.BytesReceived(&mut received);
+                    let _ = op.TotalBytesToReceive(&mut total);
+                    cb(DlEvent::Progress { id, received, total });
+                    crate::DlState::Running
+                };
+                if matches!(state, crate::DlState::Done | crate::DlState::Cancelled) {
+                    DL_OPS.with(|m| m.borrow_mut().remove(&id));
+                }
+                crate::crashlog::debug(format!("download {id}: {state:?}"));
+                cb(DlEvent::State { id, state, path });
+                Ok(())
+            }));
+            let mut t = Default::default();
+            let _ = op.add_StateChanged(&sh, &mut t);
+            Ok(())
+        }));
+        let mut token = Default::default();
+        let _ = c4.add_DownloadStarting(&h, &mut token);
+    }
+}
+
+fn interrupt_text(code: i32) -> String {
+    match code {
+        1 | 7 => "Couldn't save the file",
+        2 => "Not allowed to save there",
+        3 => "Disk full",
+        4 => "File name too long",
+        5 => "File too large",
+        6 => "Blocked as dangerous",
+        8 | 9 => "Blocked by Windows security",
+        10 | 11 | 24 => "The file came through incomplete",
+        12 | 14 => "Connection lost",
+        13 => "The connection timed out",
+        15 => "The server is down",
+        16 | 17 | 19 | 23 | 25 => "The server had a problem",
+        18 => "The server can't resume this download",
+        20 | 22 => "The server refused the download",
+        21 => "The site's certificate is invalid",
+        27 => "Goat closed before it finished",
+        29 => "Downloading crashed",
+        _ => "Download failed",
+    }
+    .to_string()
+}
+
+/// The bar's buttons.
+pub fn download_action(id: u64, what: &str) -> bool {
+    DL_OPS.with(|m| {
+        let m = m.borrow();
+        let Some(op) = m.get(&id) else { return false };
+        unsafe {
+            match what {
+                "cancel" => op.Cancel().is_ok(),
+                "pause" => op.Pause().is_ok(),
+                "resume" => op.Resume().is_ok(),
+                _ => false,
+            }
+        }
+    })
+}

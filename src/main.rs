@@ -93,6 +93,7 @@ pub enum Ev {
     Load(u32, bool, String),
     DownloadStarted(String, String),
     DownloadDone(String, Option<String>, bool),
+    Dl(DlEvent),
     Blocked(u32),
     Notice(Notice),
 }
@@ -130,9 +131,43 @@ pub enum ContentMsg {
     },
 }
 
+/// A download as the download bar shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DlState {
+    Running,
+    Paused,
+    Done,
+    Cancelled,
+    Failed { reason: String, can_resume: bool },
+}
+
+/// What the download bar hears about one download.
+#[derive(Debug, Clone)]
+pub enum DlEvent {
+    Start { id: u64, path: String, total: i64 },
+    Progress { id: u64, received: i64, total: i64 },
+    State { id: u64, state: DlState, path: String },
+}
+
+pub struct DlItem {
+    pub id: u64,
+    pub path: String,
+    pub received: i64,
+    pub total: i64,
+    pub state: DlState,
+    /// (time, bytes) a moment ago, for the speed.
+    pub sample: (f64, i64),
+    pub speed: f64,
+    pub born: f64,
+}
+
 /// Everything the UI can ask for. Drawing code pushes these; `App::run` carries them out.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
+    /// A download bar button: "cancel", "pause", "resume", "open", "folder", "remove".
+    Download(u64, &'static str),
+    /// Hide the download bar (finished downloads leave it).
+    DownloadBarClose,
     /// Open a window for another profile ("" = default).
     OpenProfile(String),
     /// Answer to "Add extension?": yes or no.
@@ -416,6 +451,9 @@ pub struct App {
     last_standby_check: f64,
     last_history_prune: f64,
     opaque_done: bool,
+    /// The download bar along the bottom: its downloads, and whether it's showing.
+    pub dl_items: Vec<DlItem>,
+    pub dl_bar: bool,
     /// Site icons loaded for the bookmarks bar (host → picture, None = there isn't one).
     pub site_icons: std::cell::RefCell<std::collections::HashMap<String, Option<egui::TextureHandle>>>,
     /// A pop-up that is animating closed: (popup, anchor, start time).
@@ -692,6 +730,8 @@ fn main() -> eframe::Result<()> {
                 last_standby_check: 0.0,
                 last_history_prune: 0.0,
                 opaque_done: false,
+                dl_items: Vec::new(),
+                dl_bar: false,
                 site_icons: Default::default(),
                 popup_closing: None,
                 popup_closed_at: None,
@@ -1266,6 +1306,13 @@ impl App {
                 }
                 {
                     let (tx, c) = (tx.clone(), c.clone());
+                    winhooks::watch_downloads(&webview, move |e| {
+                        let _ = tx.send(Ev::Dl(e));
+                        c.request_repaint();
+                    });
+                }
+                {
+                    let (tx, c) = (tx.clone(), c.clone());
                     winhooks::watch_audio(&webview, move |playing| {
                         let _ = tx.send(Ev::Audio(id, playing));
                         c.request_repaint();
@@ -1583,6 +1630,11 @@ impl App {
             t.url = url.to_string();
         }
         self.addr_editing = false;
+    }
+
+    /// The download bar is used (Windows, setting on).
+    pub fn download_bar_on(&self) -> bool {
+        cfg!(windows) && self.settings().download_bar
     }
 
     pub fn toast(&mut self, text: impl Into<String>) {
@@ -1969,15 +2021,60 @@ impl App {
             }
             Ev::DownloadStarted(url, path) => {
                 self.sh.store.lock().unwrap().download_started(&url, &path);
-                let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                self.toast(format!("Downloading {name}"));
+                // With the download bar the bar itself says so.
+                if !self.download_bar_on() {
+                    let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.toast(format!("Downloading {name}"));
+                }
             }
             Ev::DownloadDone(url, path, ok) => {
                 self.sh.store.lock().unwrap().download_finished(&url, path.as_deref(), ok);
-                if ok {
-                    self.toast_action("Download complete", "Show", Cmd::OpenPage("downloads"));
-                } else {
-                    self.toast("Download failed");
+                if !self.download_bar_on() {
+                    if ok {
+                        self.toast_action("Download complete", "Show", Cmd::OpenPage("downloads"));
+                    } else {
+                        self.toast("Download failed");
+                    }
+                }
+            }
+            Ev::Dl(e) => {
+                let t = now(&self.ctx);
+                match e {
+                    DlEvent::Start { id, path, total } => {
+                        self.dl_items.push(DlItem { id, path, received: 0, total, state: DlState::Running, sample: (t, 0), speed: 0.0, born: t });
+                        // Newest first, at most 8 on the bar.
+                        self.dl_items.sort_by(|a, b| b.id.cmp(&a.id));
+                        self.dl_items.truncate(8);
+                        self.dl_bar = true;
+                    }
+                    DlEvent::Progress { id, received, total } => {
+                        if let Some(d) = self.dl_items.iter_mut().find(|d| d.id == id) {
+                            let dt = t - d.sample.0;
+                            if dt >= 1.0 {
+                                let now_speed = (received - d.sample.1).max(0) as f64 / dt;
+                                d.speed = if d.speed == 0.0 { now_speed } else { d.speed * 0.6 + now_speed * 0.4 };
+                                d.sample = (t, received);
+                            }
+                            d.received = received;
+                            if total > 0 {
+                                d.total = total;
+                            }
+                        }
+                    }
+                    DlEvent::State { id, state, path } => {
+                        if let Some(d) = self.dl_items.iter_mut().find(|d| d.id == id) {
+                            if !path.is_empty() {
+                                d.path = path;
+                            }
+                            if state == DlState::Done && d.total > 0 {
+                                d.received = d.total;
+                            }
+                            if state != DlState::Running {
+                                d.speed = 0.0;
+                            }
+                            d.state = state;
+                        }
+                    }
                 }
             }
             Ev::Notice(n) => match n {
@@ -2446,6 +2543,35 @@ impl App {
                 } else {
                     self.load_active(&url);
                 }
+            }
+            Cmd::Download(id, what) => {
+                let Some(i) = self.dl_items.iter().position(|d| d.id == id) else { return };
+                let path = self.dl_items[i].path.clone();
+                match what {
+                    "open" => {
+                        #[cfg(windows)]
+                        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+                        #[cfg(not(windows))]
+                        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                    }
+                    "folder" => {
+                        #[cfg(windows)]
+                        let _ = std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn();
+                    }
+                    "remove" => {
+                        self.dl_items.remove(i);
+                    }
+                    _ => {
+                        #[cfg(windows)]
+                        if !winhooks::download_action(id, what) {
+                            self.toast("That download can't be changed now");
+                        }
+                    }
+                }
+            }
+            Cmd::DownloadBarClose => {
+                self.dl_bar = false;
+                self.dl_items.retain(|d| matches!(d.state, DlState::Running | DlState::Paused));
             }
             Cmd::OpenPage(page) => {
                 let url = format!("{INTERNAL_BASE}/{page}");

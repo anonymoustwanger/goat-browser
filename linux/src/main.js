@@ -210,7 +210,8 @@ const DEFAULT_SETTINGS = {
   adblock: { enabled: true, level: 'standard', allowlist: [], customRules: '', skipExtensions: true }, // skipExtensions: never filter extensions' own requests
   cookies: { blockThirdParty: true, clearOnExit: false },
   pipButton: true,
-  askDownload: true, // ask where to save each download // a Pop out (picture in picture) button on videos
+  askDownload: true, // ask where to save each download
+  downloadBar: true, // a bar along the bottom with each download's progress // a Pop out (picture in picture) button on videos
   uploads: { paste: true }, // paste: offer the clipboard's image when a site asks for an image file
   extensions: { unpacked: [], hidden: [], pinned: null }, // pinned: ids shown in the toolbar
   proxy: { mode: 'system', type: 'socks5', host: '', port: '', bypass: '<local>', pacUrl: '', username: '', password: '' },
@@ -329,6 +330,8 @@ function loadSettings() {
 
 let saveTimer = null;
 function saveSettings() {
+  // The download bar setting may have changed.
+  if (typeof layout === 'function' && win) setImmediate(() => { try { layout(); } catch { /* window closing */ } });
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     if (EPHEMERAL) return;
@@ -798,6 +801,7 @@ function applyAppearance() {
   }
   if (ui && !ui.webContents.isDestroyed()) { ui.setBackgroundColor(a.bg); ui.webContents.send('appearance', a); }
   if (panel && !panel.webContents.isDestroyed()) panel.webContents.send('appearance', a);
+  if (dlBar && !dlBar.webContents.isDestroyed()) { dlBar.setBackgroundColor(a.bg); dlBar.webContents.send('appearance', a); }
   for (const tab of tabs.values()) {
     const wc = tab.view.webContents;
     if (!wc.isDestroyed() && wc.getURL().startsWith(`${SCHEME}://`)) { wc.send('goat:appearance', a); tab.view.setBackgroundColor(a.bg); }
@@ -1128,11 +1132,81 @@ function configureSession(s) {
       for (let i = 1; fs.existsSync(file); i++) file = path.join(dir, `${base} (${i})${ext}`);
       item.setSavePath(file);
     }
+    const d = dlAdd(item);
+    item.on('updated', (_ev, state) => dlUpdate(d, state));
     item.once('done', (_ev, state) => {
-      const name = item.getFilename();
-      toast(state === 'completed' ? `Downloaded ${name}` : `Download ${state}: ${name}`);
+      dlUpdate(d, state);
+      if (settings.downloadBar === false) {
+        const name = item.getFilename();
+        toast(state === 'completed' ? `Downloaded ${name}` : `Download ${state}: ${name}`);
+      }
     });
   });
+}
+
+// ------------------------------------------------------------- download bar
+// A bar along the bottom of the window: each download's progress, speed and time left.
+const DL_H = 48;
+let dlItems = []; // newest first
+let dlOpen = false;
+let dlBar = null;
+let nextDl = 1;
+let dlSendAt = 0;
+function dlShown() { return settings.downloadBar !== false && dlOpen && dlItems.length > 0 && !fullscreen; }
+function dlAdd(item) {
+  const d = { id: nextDl++, item, name: item.getFilename(), path: '', received: 0, total: item.getTotalBytes(), state: 'progressing', paused: false, canResume: false, speed: 0, sample: [Date.now(), 0] };
+  dlItems.unshift(d);
+  dlItems = dlItems.slice(0, 8);
+  dlOpen = true;
+  dlSend(true);
+  layout();
+  return d;
+}
+function dlUpdate(d, state) {
+  const it = d.item;
+  d.state = state === 'progressing' ? 'progressing' : state;
+  d.received = it.getReceivedBytes();
+  d.total = it.getTotalBytes();
+  d.paused = state === 'progressing' && it.isPaused();
+  d.canResume = state === 'interrupted' && it.canResume();
+  d.name = it.getFilename();
+  d.path = it.getSavePath();
+  const now = Date.now();
+  const dt = (now - d.sample[0]) / 1000;
+  if (dt >= 1) {
+    const v = Math.max(0, d.received - d.sample[1]) / dt;
+    d.speed = d.speed ? d.speed * 0.6 + v * 0.4 : v;
+    d.sample = [now, d.received];
+  }
+  if (state !== 'progressing' || d.paused) d.speed = 0;
+  dlSend(state !== 'progressing');
+}
+function dlSend(now) {
+  if (!now && Date.now() - dlSendAt < 150) return;
+  dlSendAt = Date.now();
+  if (!dlShown()) return;
+  const bar = ensureDlBar();
+  if (!bar) return;
+  const list = dlItems.map(({ item, sample, ...rest }) => rest);
+  if (!bar.webContents.isLoading()) bar.webContents.send('dl-items', list);
+}
+function ensureDlBar() {
+  if (!win) return null;
+  if (dlBar && !dlBar.webContents.isDestroyed()) return dlBar;
+  dlBar = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'panel', 'dlbar-preload.js'),
+      contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false,
+    },
+  });
+  dlBar.setBackgroundColor(appearance().bg);
+  const wc = dlBar.webContents;
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.on('will-navigate', (e) => e.preventDefault());
+  wc.on('did-finish-load', () => { wc.send('appearance', appearance()); dlSend(true); });
+  wc.loadFile(path.join(__dirname, 'panel', 'dlbar.html'));
+  win.contentView.addChildView(dlBar);
+  return dlBar;
 }
 
 // ------------------------------------------------------------ site icons
@@ -2542,6 +2616,28 @@ function wireAppMenuIpc() {
   ipcMain.on('app-menu', fromUi((rect) => toggleAppMenu(rect)));
   ipcMain.on('appmenu:size', fromMenu((h) => { appMenuHeight = Math.max(160, Math.min(720, Math.ceil(Number(h) || 460))); placeAppMenu(); }));
   ipcMain.on('appmenu:close', fromMenu(() => { hideAppMenu(); activeWc()?.focus(); }));
+  ipcMain.on('dlbar:do', (event, id, action) => {
+    if (!dlBar || event.sender !== dlBar.webContents) return;
+    if (action === 'all') { shell.openPath(app.getPath('downloads')); return; }
+    if (action === 'close') {
+      dlOpen = false;
+      dlItems = dlItems.filter((d) => d.state === 'progressing');
+      layout();
+      return;
+    }
+    const d = dlItems.find((x) => x.id === id);
+    if (!d) return;
+    const it = d.item;
+    switch (action) {
+      case 'pause': it.pause(); break;
+      case 'resume': case 'retry': if (it.canResume()) it.resume(); break;
+      case 'cancel': it.cancel(); break;
+      case 'open': if (d.path) shell.openPath(d.path); break;
+      case 'folder': if (d.path) shell.showItemInFolder(d.path); break;
+      case 'remove': dlItems = dlItems.filter((x) => x !== d); if (!dlItems.length) dlOpen = false; layout(); break;
+    }
+    setTimeout(() => dlUpdate(d, it.getState()), 50);
+  });
   ipcMain.on('appmenu:do', fromMenu((action) => {
     const keepOpen = ['zoomin', 'zoomout', 'zoomreset'].includes(action);
     if (!keepOpen) hideAppMenu();
@@ -3272,8 +3368,15 @@ function layout() {
   const top = fullscreen ? 0 : uiHeight();
   ui.setVisible(!fullscreen);
   ui.setBounds({ x: 0, y: 0, width, height: uiHeight() });
+  const dl = dlShown() ? DL_H : 0;
   const t = tabs.get(activeId);
-  if (t) t.view.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top) });
+  if (t) t.view.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top - dl) });
+  if (dl) {
+    const bar = ensureDlBar();
+    if (bar) { bar.setVisible(true); bar.setBounds({ x: 0, y: height - dl, width, height: dl }); }
+  } else if (dlBar && !dlBar.webContents.isDestroyed()) {
+    dlBar.setVisible(false);
+  }
 }
 
 function createWindow() {
