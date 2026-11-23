@@ -493,7 +493,8 @@ impl App {
             let resp = ui.interact(hit, tid, Sense::click_and_drag());
             // Drag to reorder; drag out of the strip to move it to another window.
             if resp.drag_started() {
-                if let Some(p) = ctx.input(|i| i.pointer.press_origin()) {
+                let x_rect = Rect::from_min_size(pos2(rect.right() - 6.0 - 22.0, rect.center().y - 11.0), Vec2::splat(22.0)).expand(2.0);
+                if let Some(p) = ctx.input(|i| i.pointer.press_origin()).filter(|p| !x_rect.contains(*p)) {
                     self.tab_drag = Some((id, p.x - rect.left(), false));
                 }
             }
@@ -534,10 +535,26 @@ impl App {
             let show_close = active || (over && aw > 96.0) || (narrow && over);
             let close = ui.interact(close_rect, tid.with("x"), Sense::click());
             let hovered = over;
+            // The × works on any tab without switching to it first. Decided by where the
+            // pointer is (the tab underneath grabs the press for dragging, so the button's own
+            // hover/click can't be trusted): press on the × arms it, release on it closes.
+            let ptr = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+            let on_x = show_close && ptr.is_some_and(|p| close_rect.expand(2.0).contains(p));
+            let armed_id = Id::new("tab-x-armed");
+            if on_x && ctx.input(|i| i.pointer.primary_pressed()) {
+                ctx.data_mut(|d| d.insert_temp(armed_id, id));
+            }
+            let x_click = ctx.input(|i| i.pointer.primary_released())
+                && on_x
+                && ctx.data(|d| d.get_temp::<u32>(armed_id)) == Some(id);
+            if ctx.input(|i| i.pointer.primary_released()) && ctx.data(|d| d.get_temp::<u32>(armed_id)) == Some(id) {
+                ctx.data_mut(|d| d.remove::<u32>(armed_id));
+            }
 
-            if (show_close && close.clicked()) || resp.middle_clicked() {
+            if x_click || resp.middle_clicked() {
                 cmds.push(Cmd::CloseTab(id));
-            } else if over && !(show_close && close.hovered()) && ctx.input(|i| i.pointer.primary_pressed()) && !active {
+                self.tab_drag = None;
+            } else if over && !on_x && ctx.input(|i| i.pointer.primary_pressed()) && !active {
                 cmds.push(Cmd::SelectTab(id));
             }
             if resp.secondary_clicked() {

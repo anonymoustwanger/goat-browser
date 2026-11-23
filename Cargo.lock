@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "goat"
-version = "1.0.16"
+version = "1.0.17"
 dependencies = [
  "adblock",
  "arboard",
