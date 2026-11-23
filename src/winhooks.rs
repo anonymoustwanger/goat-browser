@@ -521,10 +521,13 @@ pub fn watch_load_errors(webview: &wry::WebView) {
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
                 return Ok(());
             }
-            // The link was a file download: the page stays as it was.
+            // "Aborted" is what a link that turns into a file download ends with (the timing
+            // check alone missed it, e.g. while the Save As window was open): the page stays as
+            // it was. Any other failure right after a download started is ignored too.
             if status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED
-                && epoch_ms().saturating_sub(LAST_DOWNLOAD_MS.load(std::sync::atomic::Ordering::Relaxed)) < 15_000
+                || epoch_ms().saturating_sub(LAST_DOWNLOAD_MS.load(std::sync::atomic::Ordering::Relaxed)) < 30_000
             {
+                crate::crashlog::debug(format!("load error {} ignored (download or aborted)", status.0));
                 return Ok(());
             }
             // The site answered (404, 500…): its own page shows.
@@ -839,5 +842,36 @@ pub fn in_move_size() -> bool {
     unsafe {
         let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
         GetGUIThreadInfo(0, &mut info).is_ok() && (info.flags & GUI_INMOVESIZE).0 != 0
+    }
+}
+
+/// Goat isn't a game: with variable refresh rate the monitor followed Goat's own (uneven)
+/// redraws, so web pages stuttered. Windows' per-app graphics setting turns that off for Goat
+/// (the same switch as Settings > Display > Graphics > Goat). Only written if not already set.
+pub fn opt_out_of_vrr() {
+    use windows::Win32::System::Registry::{RegCreateKeyExW, RegQueryValueExW, RegSetValueExW, RegCloseKey, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ};
+    let Ok(exe) = std::env::current_exe() else { return };
+    let name = HSTRING::from(exe.as_os_str());
+    unsafe {
+        let mut key = HKEY::default();
+        if RegCreateKeyExW(HKEY_CURRENT_USER, &HSTRING::from("Software\\Microsoft\\DirectX\\UserGpuPreferences"), None, None, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE, None, &mut key, None).is_err() {
+            return;
+        }
+        // Keep anything the user chose there (e.g. which GPU); only add the VRR switch.
+        let mut buf = vec![0u16; 512];
+        let mut len = (buf.len() * 2) as u32;
+        let cur = if RegQueryValueExW(key, &name, None, None, Some(buf.as_mut_ptr() as *mut u8), Some(&mut len)).is_ok() {
+            String::from_utf16_lossy(&buf[..(len as usize / 2)]).trim_end_matches('\0').to_string()
+        } else {
+            String::new()
+        };
+        if !cur.contains("VRROptimizeEnable=") {
+            let new = format!("{cur}VRROptimizeEnable=0;");
+            let w: Vec<u16> = new.encode_utf16().chain(std::iter::once(0)).collect();
+            let bytes = std::slice::from_raw_parts(w.as_ptr() as *const u8, w.len() * 2);
+            let _ = RegSetValueExW(key, &name, None, REG_SZ, Some(bytes));
+            crate::crashlog::debug("variable refresh rate turned off for Goat (Windows graphics setting)");
+        }
+        let _ = RegCloseKey(key);
     }
 }

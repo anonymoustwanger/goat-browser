@@ -367,6 +367,8 @@ pub struct App {
     pub choosing_profile: bool,
     /// Frame timing (for the debug log) and the monitor's refresh rate.
     frame_stats: (std::time::Instant, u32, f32, f32),
+    /// What asked for the frames counted in frame_stats (for the debug log).
+    repaint_why: std::collections::HashMap<String, u32>,
     refresh_hz: u32,
     pub profile_always: bool,
     /// The Tor circuit panel's contents (filled in by a background lookup).
@@ -577,6 +579,8 @@ fn main() -> eframe::Result<()> {
     let mut options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
     options.glow_options.vsync = !cfg!(windows);
 
+    #[cfg(windows)]
+    winhooks::opt_out_of_vrr();
     let result = eframe::run_native(
         "Goat",
         options,
@@ -654,6 +658,7 @@ fn main() -> eframe::Result<()> {
                 profile_badge: None,
                 choosing_profile: false,
                 frame_stats: (std::time::Instant::now(), 0, 0.0, 0.0),
+                repaint_why: Default::default(),
                 refresh_hz: 0,
                 profile_always: false,
                 #[cfg(windows)]
@@ -2889,6 +2894,8 @@ impl App {
                     tab.title = t.title.clone();
                     if !active {
                         tab.pending = Some(t.url.clone());
+                        // Asleep, not loading: a spinner here redrew the window non-stop.
+                        tab.loading = false;
                     }
                 }
             }
@@ -3353,6 +3360,9 @@ impl eframe::App for App {
         // Every 2 s of continuous drawing (an animation), log how fast frames came.
         {
             let ms = ft.as_secs_f32() * 1000.0;
+            for c in ui.ctx().repaint_causes() {
+                *self.repaint_why.entry(format!("{}:{}", c.file.rsplit(['/', '\\']).next().unwrap_or(""), c.line)).or_default() += 1;
+            }
             let (start, n, sum, max) = &mut self.frame_stats;
             *n += 1;
             *sum += ms;
@@ -3360,9 +3370,13 @@ impl eframe::App for App {
             let el = start.elapsed().as_secs_f32();
             if el >= 2.0 {
                 if *n as f32 / el > 20.0 {
-                    crashlog::debug(format!("frames: {:.0} fps (screen {} Hz), Goat's work per frame avg {:.1} ms, max {:.1} ms", *n as f32 / el, self.refresh_hz, *sum / *n as f32, *max));
+                    let mut why: Vec<_> = self.repaint_why.iter().collect();
+                    why.sort_by(|a, b| b.1.cmp(a.1));
+                    let why: Vec<String> = why.iter().take(4).map(|(k, v)| format!("{k}×{v}")).collect();
+                    crashlog::debug(format!("frames: {:.0} fps (screen {} Hz), Goat's work per frame avg {:.1} ms, max {:.1} ms, asked by {}", *n as f32 / el, self.refresh_hz, *sum / *n as f32, *max, why.join(" ")));
                 }
                 self.frame_stats = (std::time::Instant::now(), 0, 0.0, 0.0);
+                self.repaint_why.clear();
             }
         }
         crashlog::phase("between frames (egui painting / window events)");
